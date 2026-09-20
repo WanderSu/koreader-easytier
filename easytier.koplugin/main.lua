@@ -14,7 +14,7 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
 local util = require("util")
-local _ = require("et_i18n").tr
+local _ = require("gettext")
 
 local Config = require("et_config")
 local Proc = require("et_proc")
@@ -108,21 +108,21 @@ end
 
 function EasyTier:start(touchmenu_instance)
     if Proc.is_running(self.cfg) then
-        UI.info(_("EasyTier is already running."), 3)
+        UI.info(_("EasyTier 已经在运行了。"), 3)
         if touchmenu_instance then touchmenu_instance:updateItems() end
         return
     end
 
     local ok, err, warn = Config.validate(self.cfg)
     if not ok then
-        UI.info(_("There is a problem with the settings:\n\n") .. err, 10)
+        UI.info(_("配置有问题：\n\n") .. err, 10)
         return
     end
 
     if not Proc.find(Config.CORE_NAME, self.cfg) then
-        UI.choose(_("easytier-core executable not found"), {
-            { text = _("Show installation help"), callback = function() self:show_install_help() end },
-            { text = _("Run diagnostics"), callback = function() self:show_diagnostics() end },
+        UI.choose(_("没找到 easytier-core 可执行文件"), {
+            { text = _("看安装说明"), callback = function() self:show_install_help() end },
+            { text = _("运行诊断"), callback = function() self:show_diagnostics() end },
         })
         return
     end
@@ -130,23 +130,23 @@ function EasyTier:start(touchmenu_instance)
     if self.cfg.mode == "tun" then
         local state = Proc.tun_state()
         if state == "missing" then
-            UI.choose(_("There is no /dev/net/tun on this device; the kernel may lack TUN support"), {
+            UI.choose(_("设备上没有 /dev/net/tun，内核可能没有 TUN 驱动"), {
                 {
-                    text = _("Switch to proxy mode (no TUN)"),
+                    text = _("改用代理模式（不建 TUN）"),
                     callback = function()
                         self.cfg.mode = "proxy"
                         Config.save(self.cfg)
-                        UI.info(_("Switched to proxy mode: only traffic that explicitly goes through SOCKS5 or a port forward can reach the network."), 6)
+                        UI.info(_("已切换到代理模式：只有本机显式走 SOCKS5 或端口转发的流量能进入虚拟网络。"), 6)
                         self:start(touchmenu_instance)
                     end,
                 },
-                { text = _("Show diagnostics"), callback = function() self:show_diagnostics() end },
+                { text = _("看诊断信息"), callback = function() self:show_diagnostics() end },
             })
             return
         end
     end
 
-    local busy = UI.busy(_("Starting EasyTier…"))
+    local busy = UI.busy(_("正在启动 EasyTier…"))
     local started, res = Proc.start(self.cfg)
     UIManager:close(busy)
 
@@ -163,9 +163,9 @@ function EasyTier:start(touchmenu_instance)
     if not ok2 then
         self.cfg.active = false
         Config.save(self.cfg)
-        local msg = _("easytier-core exited shortly after starting, so it is not running.\n\nEnd of the log:\n")
-            .. ((detail ~= nil and detail ~= "") and detail or _("(log is empty)"))
-            .. "\n\n" .. _("See Tools → Diagnostics for the environment (TUN, architecture, binaries), or Tools → Log for the full output.")
+        local msg = _("EasyTier 进程启动后很快退出了，所以没有进入运行状态。\n\n日志末尾：\n")
+            .. ((detail ~= nil and detail ~= "") and detail or _("(日志为空)"))
+            .. "\n\n" .. _("可到「工具 → 运行诊断」看环境（TUN、架构、二进制），或到「工具 → 查看日志」看完整输出。")
         UI.info(msg, 20)
         if touchmenu_instance then touchmenu_instance:updateItems() end
         return
@@ -174,12 +174,12 @@ function EasyTier:start(touchmenu_instance)
     local pid = Proc.pid(self.cfg) or res
     local msg
     if reason == "rpc" then
-        msg = string.format(_("EasyTier connected (PID %s).\n\nOpen Status to see the virtual IP, peers and routes."), tostring(pid))
+        msg = string.format(_("EasyTier 已连接（PID %s）。\n\n点「连接状态」可以看到虚拟 IP、对端列表和路由。"), tostring(pid))
     elseif reason == "no_cli" then
-        msg = string.format(_("EasyTier is running (PID %s) but easytier-cli was not found, so peer and route info cannot be read.\n\nPut easytier-cli in the same directory as easytier-core."), tostring(pid))
+        msg = string.format(_("EasyTier 已在运行（PID %s），但没找到 easytier-cli，读不到节点状态。\n\n把 easytier-cli 放在 easytier-core 同一个目录里即可。"), tostring(pid))
     else
-        msg = string.format(_("easytier-core is running (PID %s) but its RPC port is not answering.\n\nUsual causes: network name/secret mismatch with the peers, unreachable peer address, or the RPC port being taken.\n\nEnd of the log:\n%s"),
-            tostring(pid), (detail ~= nil and detail ~= "") and detail or _("(log is empty)"))
+        msg = string.format(_("EasyTier 进程在运行（PID %s），但 RPC 端口没有响应。\n\n常见原因：网络名称/密钥与对端不一致、对等节点地址不可达、RPC 端口被占用。\n\n日志末尾：\n%s"),
+            tostring(pid), (detail ~= nil and detail ~= "") and detail or _("(日志为空)"))
     end
     if warn then msg = msg .. "\n\n" .. warn end
     UI.info(msg, reason == "rpc" and 6 or 15)
@@ -190,19 +190,19 @@ function EasyTier:stop(touchmenu_instance, force)
     if not Proc.is_running(self.cfg) then
         self.cfg.active = false
         Config.save(self.cfg)
-        UI.info(_("EasyTier is not running."), 3)
+        UI.info(_("EasyTier 当前没有运行。"), 3)
         if touchmenu_instance then touchmenu_instance:updateItems() end
         return
     end
-    local busy = UI.busy(_("Stopping EasyTier…"))
+    local busy = UI.busy(_("正在停止 EasyTier…"))
     local ok, err = Proc.stop(self.cfg, force)
     UIManager:close(busy)
     self.cfg.active = false
     Config.save(self.cfg)
     if ok then
-        UI.info(_("EasyTier stopped."), 3)
+        UI.info(_("EasyTier 已停止。"), 3)
     else
-        UI.info(_("Could not stop it completely: ") .. tostring(err) .. _("\nYou can force it from Tools → Kill leftover processes."), 10)
+        UI.info(_("没能完全停掉：") .. tostring(err) .. _("\n可以到「工具 → 清理残留进程」强制处理。"), 10)
     end
     if touchmenu_instance then touchmenu_instance:updateItems() end
 end
@@ -216,7 +216,7 @@ function EasyTier:toggle(touchmenu_instance)
 end
 
 function EasyTier:restart(touchmenu_instance)
-    local busy = UI.busy(_("Restarting EasyTier…"))
+    local busy = UI.busy(_("正在重启 EasyTier…"))
     Proc.stop(self.cfg, true)
     UIManager:close(busy)
     self:start(touchmenu_instance)
@@ -302,18 +302,18 @@ end
 
 function EasyTier:show_status()
     UI.show_text{
-        title = _("EasyTier status"),
+        title = _("EasyTier 连接状态"),
         build = function() return self:status_text() end,
     }
 end
 
 function EasyTier:show_log()
     UI.show_text{
-        title = _("EasyTier log"),
+        title = _("EasyTier 日志"),
         build = function()
             local text = Proc.tail_log(250)
             if text == "" then
-                text = _("(No log yet)\n\nStart EasyTier once and easytier-core's output will show up here.")
+                text = _("(暂无日志)\n\n启动一次之后这里会有 easytier-core 的输出。")
             end
             return text
         end,
@@ -321,11 +321,11 @@ function EasyTier:show_log()
 end
 
 function EasyTier:show_diagnostics()
-    local busy = UI.busy(_("Collecting diagnostics…"))
+    local busy = UI.busy(_("正在收集诊断信息…"))
     local report = Proc.diagnostics(self.cfg)
     UIManager:close(busy)
     UI.show_text{
-        title = _("EasyTier diagnostics"),
+        title = _("EasyTier 诊断"),
         build = function() return report end,
     }
 end
@@ -333,15 +333,15 @@ end
 --- KOReader 自己的崩溃日志（插件出错时，原因通常写在这里）
 function EasyTier:show_crash_log()
     UI.show_text{
-        title = _("KOReader crash.log (tail)"),
+        title = _("KOReader 崩溃日志（末尾）"),
         build = function()
             local path = Proc.crash_log_path()
             local text = Proc.tail_file(path, 120)
             if text == "" then
-                return _("Could not read the crash log: \n") .. path
-                    .. _("\n\n(Empty if nothing crashed yet, or if the log was cleared.)")
+                return _("没有读到崩溃日志：\n") .. path
+                    .. _("\n\n（如果这次没有崩过，或日志被清理过，这里就是空的）")
             end
-            return _("File: ") .. path .. "\n\n" .. text
+            return _("文件：") .. path .. "\n\n" .. text
         end,
     }
 end
@@ -373,7 +373,7 @@ function EasyTier:show_install_help()
         "· Kindle 的系统防火墙可能拦进入 TUN 的包，插件启动时会自动加一条 iptables 放行规则。",
     }
     UI.show_text{
-        title = _("Installation"),
+        title = _("安装说明"),
         build = function() return table.concat(lines, "\n") end,
         monospace = false,
     }
@@ -381,12 +381,12 @@ end
 
 function EasyTier:cleanup_stale()
     UI.confirm(
-        _("This kills every easytier-core process on the device, including ones started outside this plugin. Continue?"),
+        _("会杀掉设备上所有 easytier-core 进程（包括不是本插件启动的）。继续？"),
         function()
             local n = Proc.kill_all(true)
-            UI.info(string.format(_("Killed %d process(es)."), n), 4)
+            UI.info(string.format(_("已清理 %d 个进程。"), n), 4)
         end,
-        _("Kill")
+        _("清理")
     )
 end
 
@@ -436,10 +436,10 @@ end
 --==========================================================================
 
 function EasyTier:onDispatcherRegisterActions()
-    Dispatcher:registerAction("easytier_toggle", { category = "none", event = "EasyTierToggle", title = _("Toggle EasyTier"), general = true })
-    Dispatcher:registerAction("easytier_start", { category = "none", event = "EasyTierStart", title = _("Start EasyTier mesh"), general = true })
-    Dispatcher:registerAction("easytier_stop", { category = "none", event = "EasyTierStop", title = _("Stop EasyTier mesh"), general = true })
-    Dispatcher:registerAction("easytier_status", { category = "none", event = "EasyTierStatus", title = _("EasyTier status"), general = true, separator = true })
+    Dispatcher:registerAction("easytier_toggle", { category = "none", event = "EasyTierToggle", title = _("EasyTier 组网开关"), general = true })
+    Dispatcher:registerAction("easytier_start", { category = "none", event = "EasyTierStart", title = _("启动 EasyTier 组网"), general = true })
+    Dispatcher:registerAction("easytier_stop", { category = "none", event = "EasyTierStop", title = _("停止 EasyTier 组网"), general = true })
+    Dispatcher:registerAction("easytier_status", { category = "none", event = "EasyTierStatus", title = _("EasyTier 连接状态"), general = true, separator = true })
 end
 
 function EasyTier:onEasyTierToggle() self:toggle() end
@@ -465,69 +465,69 @@ function EasyTier:addToMainMenu(menu_items)
 
     menu_items.easytier = {
         sorting_hint = "network",
-        text = _("EasyTier mesh networking"),
+        text = _("EasyTier 异地组网"),
         sub_item_table = {
             {
                 text_func = function()
                     local pid = Proc.pid(self.cfg)
-                    if pid then return string.format(_("Stop EasyTier (PID %d)"), pid) end
-                    return _("Start EasyTier")
+                    if pid then return string.format(_("停止 EasyTier（PID %d）"), pid) end
+                    return _("启动 EasyTier")
                 end,
                 checked_func = function() return Proc.is_running(self.cfg) end,
                 keep_menu_open = true,
                 callback = function(touchmenu_instance) self:toggle(touchmenu_instance) end,
             },
             {
-                text = _("Status"),
+                text = _("连接状态"),
                 keep_menu_open = true,
                 callback = function() self:show_status() end,
             },
             {
-                text = _("Settings"),
+                text = _("配置"),
                 sub_item_table = {
                     {
                         text_func = function()
-                            return string.format(_("Network name: %s"), self.cfg.network_name ~= "" and self.cfg.network_name or _("(not set)"))
+                            return string.format(_("网络名称：%s"), self.cfg.network_name ~= "" and self.cfg.network_name or _("(未设置)"))
                         end,
                         keep_menu_open = true,
                         callback = function(touchmenu_instance)
                             self:edit_field(touchmenu_instance, "network_name", {
-                                title = _("Network name"),
-                                hint = _("e.g. my-vpn-net"),
-                                description = _("Every node in the network must use exactly the same network name and secret."),
+                                title = _("网络名称"),
+                                hint = _("例如 my-vpn-net"),
+                                description = _("同一网络内所有节点必须使用完全相同的网络名称和密钥。"),
                             })
                         end,
                     },
                     {
                         text_func = function()
-                            local masked = self.cfg.network_secret ~= "" and "******" or _("(not set)")
-                            return string.format(_("Network secret: %s"), masked)
+                            local masked = self.cfg.network_secret ~= "" and "******" or _("(未设置)")
+                            return string.format(_("网络密钥：%s"), masked)
                         end,
                         keep_menu_open = true,
                         callback = function(touchmenu_instance)
                             self:edit_field(touchmenu_instance, "network_secret", {
-                                title = _("Network secret"),
-                                hint = _("e.g. secret-1234567890"),
-                                description = _("Acts as a password — make it long and do not keep the default."),
+                                title = _("网络密钥"),
+                                hint = _("例如 secret-1234567890"),
+                                description = _("相当于密码，建议设长一点，别用默认值。"),
                             })
                         end,
                     },
                     {
                         text_func = function()
-                            return string.format(_("Mode: %s"), self.cfg.mode == "tun" and _("TUN (full routing)") or _("Proxy (no TUN)"))
+                            return string.format(_("运行模式：%s"), self.cfg.mode == "tun" and _("TUN（全局路由）") or _("代理（无 TUN）"))
                         end,
                         keep_menu_open = true,
                         callback = function(touchmenu_instance)
-                            UI.choose(_("Mode"), {
+                            UI.choose(_("运行模式"), {
                                 {
-                                    text = _("TUN: create a virtual interface and route the whole device"),
+                                    text = _("TUN：创建虚拟网卡，整个设备走虚拟网络"),
                                     callback = function()
                                         self.cfg.mode = "tun"
                                         self:save_cfg(touchmenu_instance)
                                     end,
                                 },
                                 {
-                                    text = _("Proxy: no virtual interface, SOCKS5 only (for devices without TUN)"),
+                                    text = _("代理：不建虚拟网卡，只开 SOCKS5（需要 TUN 驱动的设备用）"),
                                     callback = function()
                                         self.cfg.mode = "proxy"
                                         self:save_cfg(touchmenu_instance)
@@ -537,35 +537,35 @@ function EasyTier:addToMainMenu(menu_items)
                         end,
                     },
                     {
-                        text = _("Assign the node IP automatically with DHCP (turn off to set it yourself)"),
+                        text = _("DHCP 自动分配 IP（关闭后需自己填节点 IP）"),
                         checked_func = function() return self.cfg.dhcp end,
                         callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "dhcp") end,
                     },
                     {
                         text_func = function()
-                            return string.format(_("Node IP: %s"), self.cfg.ipv4 ~= "" and self.cfg.ipv4 or _("(not set)"))
+                            return string.format(_("节点 IP：%s"), self.cfg.ipv4 ~= "" and self.cfg.ipv4 or _("(未设置)"))
                         end,
                         enabled_func = function() return not self.cfg.dhcp end,
                         keep_menu_open = true,
                         callback = function(touchmenu_instance)
                             self:edit_field(touchmenu_instance, "ipv4", {
-                                title = _("This node's virtual IP"),
+                                title = _("本节点虚拟 IP"),
                                 hint = "10.144.144.2",
-                                description = _("Every node uses a different address. Required when DHCP is off."),
+                                description = _("网络内每个节点用不同的地址。关掉 DHCP 后这里必须填。"),
                             })
                         end,
                     },
                     {
                         text_func = function()
-                            return string.format(_("Initial nodes: %s"), Config.list_to_text(self.cfg.peers) ~= "" and Config.list_to_text(self.cfg.peers) or _("(none)"))
+                            return string.format(_("初始节点：%s"), Config.list_to_text(self.cfg.peers) ~= "" and Config.list_to_text(self.cfg.peers) or _("(无)"))
                         end,
                         keep_menu_open = true,
                         callback = function(touchmenu_instance)
                             self:edit_field(touchmenu_instance, "peers", {
-                                title = _("Initial node (server)"),
+                                title = _("初始节点（服务器）"),
                                 is_list = true,
                                 hint = "tcp://public.easytier.top:11010",
-                                description = _("Nodes to connect to on start, comma separated.\n"
+                                description = _("启动时主动去连的节点，多个用逗号分隔。\n"
                                     .. "可以填自己的节点，也可以填别人分享的公共共享节点——\n"
                                     .. "EasyTier 不分服务端/客户端，能连上任何一个节点就能入网。\n\n"
                                     .. "公共共享节点示例：tcp://public.easytier.top:11010"),
@@ -573,81 +573,81 @@ function EasyTier:addToMainMenu(menu_items)
                         end,
                     },
                     {
-                        text = _("Advanced"),
+                        text = _("进阶"),
                         sub_item_table = {
                             {
                                 text_func = function()
-                                    return string.format(_("SOCKS5 port: %s"), tostring(self.cfg.socks5_port))
+                                    return string.format(_("SOCKS5 端口：%s"), tostring(self.cfg.socks5_port))
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "socks5_port", {
-                                        title = _("SOCKS5 port"),
+                                        title = _("SOCKS5 端口"),
                                         number = true,
                                         hint = "1080",
-                                        description = _("Proxy mode only. Other apps can point their SOCKS5 proxy at this port on 127.0.0.1."),
+                                        description = _("仅代理模式生效。其他程序可把 SOCKS5 代理指向 127.0.0.1 的这个端口。"),
                                     })
                                 end,
                             },
                             {
                                 text_func = function()
                                     local v = Config.list_to_text(self.cfg.proxy_networks)
-                                    return string.format(_("Shared local subnets: %s"), v ~= "" and v or _("(none)"))
+                                    return string.format(_("共享本机子网：%s"), v ~= "" and v or _("(无)"))
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "proxy_networks", {
-                                        title = _("Share this device's subnets"),
+                                        title = _("共享本机所在子网"),
                                         is_list = true,
                                         hint = "192.168.1.0/24",
-                                        description = _("Let other nodes reach this device's LAN. Comma separated."),
+                                        description = _("让其他节点能访问本机所在局域网，逗号分隔。"),
                                     })
                                 end,
                             },
                             {
                                 text_func = function()
                                     local v = Config.list_to_text(self.cfg.port_forwards)
-                                    return string.format(_("Port forwards: %s"), v ~= "" and v or _("(none)"))
+                                    return string.format(_("端口转发：%s"), v ~= "" and v or _("(无)"))
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "port_forwards", {
-                                        title = _("Port forwarding"),
+                                        title = _("端口转发"),
                                         is_list = true,
                                         hint = "tcp://127.0.0.1:8080/10.126.126.1:80",
-                                        description = _("Map a service from the virtual network onto a local port.\nWorks without TUN — handy for reaching Calibre/OPDS on your LAN from KOReader."),
+                                        description = _("把虚拟网络里的服务映射到本机的端口。\n没有 TUN 也能用，适合让 KOReader 访问局域网里的 Calibre / OPDS。"),
                                     })
                                 end,
                             },
                             {
                                 text_func = function()
                                     local v = Config.list_to_text(self.cfg.listeners)
-                                    return string.format(_("Listeners: %s"), v ~= "" and v or _("(default)"))
+                                    return string.format(_("监听地址：%s"), v ~= "" and v or _("(默认)"))
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "listeners", {
-                                        title = _("Listeners"),
+                                        title = _("监听地址"),
                                         is_list = true,
                                         hint = "tcp://0.0.0.0:11010, udp://0.0.0.0:11010",
                                     })
                                 end,
                             },
                             {
-                                text = _("Do not listen on any port (outbound only)"),
+                                text = _("不监听任何端口（只出站）"),
                                 checked_func = function() return self.cfg.no_listener end,
                                 callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "no_listener") end,
                             },
                             {
                                 text_func = function()
-                                    return string.format(_("RPC portal: %s"), self.cfg.rpc_portal)
+                                    return string.format(_("RPC 端口：%s"), self.cfg.rpc_portal)
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "rpc_portal", {
-                                        title = _("RPC port"),
+                                        title = _("RPC 端口"),
                                         hint = "127.0.0.1:15888",
-                                        description = _("The plugin reads node status through it; avoid clashing with other programs."),
+                                        description = _("本插件通过它读取节点状态，别和别的程序冲突。"),
                                     })
                                 end,
                             },
@@ -655,15 +655,15 @@ function EasyTier:addToMainMenu(menu_items)
                                 text_func = function()
                                     local name = self.cfg.hostname ~= ""
                                         and self.cfg.hostname
-                                        or (Proc.sys_hostname() or _("(system hostname)"))
-                                    return string.format(_("Hostname: %s"), name)
+                                        or (Proc.sys_hostname() or _("(系统主机名)"))
+                                    return string.format(_("主机名：%s"), name)
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "hostname", {
-                                        title = _("Hostname"),
+                                        title = _("主机名"),
                                         hint = "kindle-kpw6",
-                                        description = _("This is the name peers see in their node list.\n"
+                                        description = _("对端节点列表里显示的就是这个名字。\n"
                                             .. "留空则用系统主机名（Kindle 上通常是 kindle）。\n"
                                             .. "不要用空格，用横线代替；开了魔法 DNS 时会作为 <主机名>.et.net 用。"),
                                     })
@@ -671,35 +671,35 @@ function EasyTier:addToMainMenu(menu_items)
                             },
                             {
                                 text_func = function()
-                                    return string.format(_("Instance name: %s"), self.cfg.instance_name)
+                                    return string.format(_("实例名：%s"), self.cfg.instance_name)
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "instance_name", {
-                                        title = _("Instance name"),
+                                        title = _("实例名"),
                                         hint = "kindle",
-                                        description = _("Only distinguishes multiple instances on this machine; peers do not see it.\n"
+                                        description = _("只用于在同一台机器上区分多个实例，对端看不到它。\n"
                                             .. "想改对端看到的名字，请改上面的「主机名」。"),
                                     })
                                 end,
                             },
                             {
                                 text_func = function()
-                                    return string.format(_("TUN interface: %s"), self.cfg.dev_name)
+                                    return string.format(_("TUN 接口名：%s"), self.cfg.dev_name)
                                 end,
                                 enabled_func = function() return self.cfg.mode == "tun" end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "dev_name", {
-                                        title = _("TUN interface name"),
+                                        title = _("TUN 接口名"),
                                         hint = "easytier0",
-                                        description = _("At most 15 characters (kernel limit)."),
+                                        description = _("最多 15 个字符，内核限制。"),
                                     })
                                 end,
                             },
                             {
                                 text_func = function()
-                                    return string.format(_("MTU: %s"), tonumber(self.cfg.mtu) > 0 and tostring(self.cfg.mtu) or _("(default)"))
+                                    return string.format(_("MTU：%s"), tonumber(self.cfg.mtu) > 0 and tostring(self.cfg.mtu) or _("(默认)"))
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
@@ -707,69 +707,69 @@ function EasyTier:addToMainMenu(menu_items)
                                         title = _("MTU"),
                                         number = true,
                                         hint = "0",
-                                        description = _("0 keeps EasyTier's default (1360 encrypted / 1380 unencrypted)."),
+                                        description = _("0 表示用 EasyTier 默认值（加密 1360 / 不加密 1380）。"),
                                     })
                                 end,
                             },
                             {
                                 text_func = function()
-                                    return string.format(_("Default protocol: %s"), self.cfg.default_protocol ~= "" and self.cfg.default_protocol or _("(auto)"))
+                                    return string.format(_("默认协议：%s"), self.cfg.default_protocol ~= "" and self.cfg.default_protocol or _("(自动)"))
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "default_protocol", {
-                                        title = _("Protocol used to reach peers"),
+                                        title = _("连接对等节点使用的协议"),
                                         hint = "udp / tcp / ws / wss",
                                     })
                                 end,
                             },
                             {
-                                text = _("Enable the KCP proxy (steadier on lossy Wi-Fi)"),
+                                text = _("启用 KCP 代理（丢包 Wi-Fi 上更稳）"),
                                 checked_func = function() return self.cfg.enable_kcp_proxy end,
                                 callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "enable_kcp_proxy") end,
                             },
                             {
-                                text = _("Disable P2P (relay only)"),
+                                text = _("禁用 P2P（只走中转）"),
                                 checked_func = function() return self.cfg.disable_p2p end,
                                 callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "disable_p2p") end,
                             },
                             {
-                                text = _("Prefer the lowest-latency route"),
+                                text = _("延迟优先路由"),
                                 checked_func = function() return self.cfg.latency_first end,
                                 callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "latency_first") end,
                             },
                             {
-                                text = _("Magic DNS (modifies system DNS — use with care)"),
+                                text = _("魔法 DNS（会改系统 DNS，谨慎）"),
                                 checked_func = function() return self.cfg.accept_dns end,
                                 callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "accept_dns") end,
                             },
                             {
-                                text = _("Log level"),
+                                text = _("日志级别"),
                                 sub_item_table = log_level_items,
                             },
                             {
                                 text_func = function()
-                                    return string.format(_("Binary directory: %s"), self.cfg.custom_bin_dir ~= "" and self.cfg.custom_bin_dir or _("(auto-detected)"))
+                                    return string.format(_("程序目录：%s"), self.cfg.custom_bin_dir ~= "" and self.cfg.custom_bin_dir or _("(自动搜索)"))
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "custom_bin_dir", {
-                                        title = _("easytier-core directory"),
+                                        title = _("easytier-core 所在目录"),
                                         hint = "/mnt/us/easytier/bin",
-                                        description = _("Leave empty to search the usual locations."),
+                                        description = _("留空则自动搜索常见位置。"),
                                     })
                                 end,
                             },
                             {
                                 text_func = function()
-                                    return string.format(_("Extra arguments: %s"), self.cfg.extra_args ~= "" and self.cfg.extra_args or _("(none)"))
+                                    return string.format(_("额外参数：%s"), self.cfg.extra_args ~= "" and self.cfg.extra_args or _("(无)"))
                                 end,
                                 keep_menu_open = true,
                                 callback = function(touchmenu_instance)
                                     self:edit_field(touchmenu_instance, "extra_args", {
-                                        title = _("Extra arguments"),
+                                        title = _("额外参数"),
                                         hint = "--private-mode --compression zstd",
-                                        description = _("Appended verbatim to the easytier-core command line; use at your own risk."),
+                                        description = _("原样附加到 easytier-core 命令行末尾，效果自负。"),
                                     })
                                 end,
                             },
@@ -778,27 +778,27 @@ function EasyTier:addToMainMenu(menu_items)
                 },
             },
             {
-                text = _("Automation"),
+                text = _("自动化"),
                 sub_item_table = {
                     {
-                        text = _("Start EasyTier with KOReader"),
+                        text = _("随 KOReader 启动时自动组网"),
                         checked_func = function() return self.cfg.autostart end,
                         callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "autostart") end,
                     },
                     {
-                        text = _("Start after Wi-Fi connects"),
+                        text = _("连上 Wi-Fi 后自动组网"),
                         checked_func = function() return self.cfg.start_on_wifi end,
                         callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "start_on_wifi") end,
                     },
                     {
-                        text = _("Restart automatically if the process dies"),
-                        help_text = _("Restart EasyTier when KOReader comes back to the foreground or Wi-Fi reconnects, if it was running and the process is gone."),
+                        text = _("掉线/被系统中断后自动拉起"),
+                        help_text = _("KOReader 恢复前台或网络重连时，如果上次是运行状态而进程已经不在了，就重新启动。"),
                         checked_func = function() return self.cfg.watchdog end,
                         callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "watchdog") end,
                     },
                     {
-                        text = _("Open the Kindle firewall for the TUN interface on start"),
-                        help_text = _("Kindle's firewall drops packets arriving on the tunnel interface, which looks like connected but no traffic."),
+                        text = _("启动时放行 Kindle 防火墙（TUN 接口）"),
+                        help_text = _("Kindle 系统防火墙会拦进入虚拟网卡的包，导致能连上但收不到数据。"),
                         checked_func = function() return self.cfg.fix_firewall end,
                         callback = function(touchmenu_instance) self:toggle_field(touchmenu_instance, "fix_firewall") end,
                         separator = true,
@@ -806,55 +806,55 @@ function EasyTier:addToMainMenu(menu_items)
                 },
             },
             {
-                text = _("Tools"),
+                text = _("工具"),
                 sub_item_table = {
                     {
-                        text = _("Restart EasyTier"),
+                        text = _("重启组网"),
                         keep_menu_open = true,
                         callback = function(touchmenu_instance) self:restart(touchmenu_instance) end,
                     },
                     {
-                        text = _("View log"),
+                        text = _("查看日志"),
                         keep_menu_open = true,
                         callback = function() self:show_log() end,
                     },
                     {
-                        text = _("Clear log"),
+                        text = _("清空日志"),
                         keep_menu_open = true,
                         callback = function()
                             Proc.clear_log()
-                            UI.info(_("Log cleared."), 3)
+                            UI.info(_("日志已清空。"), 3)
                         end,
                     },
                     {
-                        text = _("Run diagnostics"),
+                        text = _("运行诊断"),
                         keep_menu_open = true,
                         callback = function() self:show_diagnostics() end,
                     },
                     {
-                        text = _("View KOReader crash.log"),
+                        text = _("查看 KOReader 崩溃日志"),
                         keep_menu_open = true,
                         callback = function() self:show_crash_log() end,
                     },
                     {
-                        text = _("Kill leftover easytier-core processes"),
+                        text = _("清理残留 easytier-core 进程"),
                         keep_menu_open = true,
                         callback = function() self:cleanup_stale() end,
                     },
                     {
-                        text = _("Installation"),
+                        text = _("安装说明"),
                         keep_menu_open = true,
                         callback = function() self:show_install_help() end,
                     },
                     {
-                        text = _("Restore default settings"),
+                        text = _("恢复默认设置"),
                         keep_menu_open = true,
                         callback = function(touchmenu_instance)
-                            UI.confirm(_("Reset all EasyTier plugin settings to their defaults?"), function()
+                            UI.confirm(_("把所有 EasyTier 插件设置恢复为默认值？"), function()
                                 self:deletePluginSettings()
                                 if touchmenu_instance then touchmenu_instance:updateItems() end
-                                UI.info(_("Settings restored to defaults."), 3)
-                            end, _("Restore"))
+                                UI.info(_("已恢复默认设置。"), 3)
+                            end, _("恢复"))
                         end,
                     },
                 },

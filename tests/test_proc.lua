@@ -306,7 +306,7 @@ do
     if path then
         local info = Proc.elf_info(path)
         print("ELF 识别结果: " .. tostring(info))
-        check("识别出静态链接的 ARM", info and info:find("ARM", 1, true) ~= nil and info:find("statically linked", 1, true) ~= nil, info)
+        check("识别出静态链接的 ARM", info and info:find("ARM", 1, true) ~= nil and info:find("静态链接", 1, true) ~= nil, info)
     else
         print("(未提供 easytier-core 路径，跳过 ELF 测试)")
     end

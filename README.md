@@ -1,7 +1,5 @@
 # koreader-easytier
 
-[English](README.en.md) | **简体中文**
-
 在 Kindle / Kobo 等阅读器上，用 [KOReader](https://github.com/koreader/koreader) 插件控制独立运行的
 [EasyTier](https://github.com/EasyTier/EasyTier) 异地组网节点：启停、配置、查看对端与路由。
 
@@ -17,8 +15,6 @@ TUN、权限、架构这些事都留在 EasyTier 那边，插件本体相当于�
 * **自动化**：随 KOReader 启动、连上 Wi-Fi 后启动、进程意外退出后自动拉起（看门狗）
 * **手势与 Profiles**：注册了开关 / 启动 / 停止 / 状态 4 个动作
 * **Kindle 适配**：启动时自动放行 TUN 接口的入向包（Kindle 防火墙会拦），停止时撤掉
-
-界面语言跟随 KOReader：英文为源语言，中文界面自动切中文。
 
 ## 要求
 
@@ -90,9 +86,6 @@ EasyTier 官方 Linux armv7 包是静态链接的 32 位 ARM 二进制，没有�
 
 ```bash
 tests/run-all.sh [easytier-core 路径]        # 单元测试，不需要 KOReader
-python tools/i18n_extract.py --missing      # 找出还没写进 et_i18n.lua 的待翻译字符串
-python tools/i18n_apply.py                  # 按 et_i18n.lua 的表把源码里的中文换成英文源串
 ```
 
-* 界面文案英文为源语言（gettext 的 msgid），中文对照表在 `easytier.koplugin/et_i18n.lua`
 * 命令行参数只发长选项，并与 EasyTier **v2.6.4** 源码逐个核对；升级 EasyTier 时先核对再改

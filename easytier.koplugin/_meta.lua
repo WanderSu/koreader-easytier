@@ -1,8 +1,11 @@
-local _ = require("et_i18n").tr
+local _ = require("gettext")
 
 return {
-    fullname = _("EasyTier mesh networking"),
-    description = _("\nControl a standalone EasyTier (easytier-core) node from your e-reader: start/stop, configure, and inspect peers and routes.\n\nYou need to provide the easytier-core / easytier-cli binaries (official Linux armv7 static build)."),
-    version = "0.2.0",
+    fullname = _("EasyTier 异地组网"),
+    description = _([[
+在阅读器上控制独立运行的 EasyTier（easytier-core）节点：启停、配置、查看节点与路由。
+
+需要自行提供 easytier-core / easytier-cli 可执行文件（官方 Linux armv7 静态包）。]]),
+    version = "0.2.1",
     author = "koreader-easytier",
 }
