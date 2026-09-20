@@ -66,6 +66,11 @@ if [ -d "$ROOT/easytier.koplugin" ]; then
     [ -f "$ROOT/README.md" ] && cp "$ROOT/README.md" "$OUT/koreader/plugins/easytier.koplugin/README.md"
 fi
 
+# Release 资产：插件本体 + 说明文档打成一个 zip
+if command -v python >/dev/null 2>&1; then
+    python "$ROOT/tools/pack-release.py" >/dev/null && say "已生成 $OUT/easytier.koplugin.zip"
+fi
+
 cat <<EOF
 
 $(say "完成")
