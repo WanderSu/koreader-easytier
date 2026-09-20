@@ -1,0 +1,8 @@
+# 统一用 LF：插件与脚本都要在 Linux（阅读器本体）和 macOS 上能直接用
+* text=auto eol=lf
+
+# 二进制文件不要动
+*.png binary
+*.jpg binary
+*.zip binary
+*.gz binary
