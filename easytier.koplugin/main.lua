@@ -283,7 +283,7 @@ function EasyTier:status_text()
             { label = "对等节点", args = { "peer" } },
             { label = "路由表", args = { "route" } },
         }
-        for _, q in ipairs(queries) do
+        for _i, q in ipairs(queries) do
             put("")
             put("== " .. q.label .. " ==")
             local ok, out = Proc.cli(cfg, q.args)
@@ -322,12 +322,44 @@ end
 
 function EasyTier:show_diagnostics()
     local busy = UI.busy(_("正在收集诊断信息…"))
-    local report = Proc.diagnostics(self.cfg)
-    UIManager:close(busy)
+    -- 收集过程整段 pcall：中途出错也只是弹提示，不能让异常冒进菜单回调
+    local ok, report = pcall(Proc.diagnostics, self.cfg)
+    -- 不管成功失败都要把提示框收掉，否则它会一直挂在屏幕上
+    pcall(UIManager.close, UIManager, busy)
+    if not ok then
+        logger.err("EasyTier: 收集诊断信息出错：" .. tostring(report))
+        UI.info(_("收集诊断信息时出错：\n") .. tostring(report)
+            .. _("\n\n（详情已写入 KOReader 的 crash.log）"), 20)
+        return
+    end
     UI.show_text{
         title = _("EasyTier 诊断"),
         build = function() return report end,
     }
+end
+
+--- 实测 easytier-core 版本。
+--- 会真的执行一次二进制（自解压包在阅读器上要几秒），所以单独做成一个动作，不塞进诊断页。
+function EasyTier:show_core_version()
+    local path = Proc.find(Config.CORE_NAME, self.cfg)
+    if not path then
+        UI.info(_("找不到 easytier-core。请先按「安装说明」把二进制放到设备上。"), 10)
+        return
+    end
+    local busy = UI.busy(_("正在读取版本…"))
+    local ok, ver = pcall(Proc.version, path)
+    pcall(UIManager.close, UIManager, busy)
+    if not ok then
+        logger.err("EasyTier: 读取 core 版本出错：" .. tostring(ver))
+        UI.info(_("读取版本时出错：\n") .. tostring(ver), 15)
+        return
+    end
+    if ver then
+        UI.info(path .. "\n\n" .. _("版本：") .. ver, 10)
+    else
+        UI.info(_("这个二进制不给版本号（--version / --help 都没读到输出）。\n\n")
+            .. path, 10)
+    end
 end
 
 --- KOReader 自己的崩溃日志（插件出错时，原因通常写在这里）
@@ -452,7 +484,7 @@ function EasyTier:addToMainMenu(menu_items)
 
     local log_levels = { "trace", "debug", "info", "warn", "error" }
     local log_level_items = {}
-    for _, level in ipairs(log_levels) do
+    for _i, level in ipairs(log_levels) do
         log_level_items[#log_level_items + 1] = {
             text = level,
             checked_func = function() return self.cfg.log_level == level end,
@@ -830,6 +862,11 @@ function EasyTier:addToMainMenu(menu_items)
                         text = _("运行诊断"),
                         keep_menu_open = true,
                         callback = function() self:show_diagnostics() end,
+                    },
+                    {
+                        text = _("查看 core 版本"),
+                        keep_menu_open = true,
+                        callback = function() self:show_core_version() end,
                     },
                     {
                         text = _("查看 KOReader 崩溃日志"),

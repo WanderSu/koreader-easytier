@@ -49,7 +49,7 @@ end
 function UI.choose(title, options)
     local dialog
     local buttons = {}
-    for _, opt in ipairs(options) do
+    for _i, opt in ipairs(options) do
         buttons[#buttons + 1] = { {
             text = opt.text,
             callback = function()

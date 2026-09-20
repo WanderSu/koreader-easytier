@@ -316,5 +316,44 @@ end
 
 os.execute = real_os_execute
 
+--==== 诊断：绝不执行二进制、命令都带超时 ====--
+do
+    local real_run = Proc.run
+    local run_calls = {}
+    Proc.run = function(bin, argv, t)
+        run_calls[#run_calls + 1] = tostring(bin) .. " " .. table.concat(argv or {}, " ")
+        return real_run(bin, argv, t)
+    end
+    local ok, report = pcall(Proc.diagnostics, {
+        dev_name = "easytun", dhcp = true, custom_bin_dir = "", peers = {},
+    })
+    Proc.run = real_run
+    check("诊断不报错", ok, report)
+    check("诊断返回字符串", type(report) == "string", type(report))
+    -- 关键约束：诊断页里不能再去跑 easytier-core（自解压包在阅读器上要几秒）
+    check("诊断不执行任何二进制", #run_calls == 0, table.concat(run_calls, " | "))
+    check("诊断含设备段", ok and report:find("== 设备 ==", 1, true) ~= nil)
+    check("诊断含 TUN 段", ok and report:find("CONFIG_TUN", 1, true) ~= nil)
+    check("诊断含运行状态段", ok and report:find("== 运行状态 ==", 1, true) ~= nil)
+end
+
+--==== 版本号：能从路径猜出来就猜，猜不到别硬猜 ====--
+check("官方包路径里猜出版本", Proc.version_hint("/mnt/us/easytier/easytier-linux-armv7-v2.6.4/easytier-core") == "v2.6.4")
+check("zip 文件名里猜出版本", Proc.version_hint("easytier-linux-armv7-v2.6.4.zip") == "v2.6.4")
+check("普通路径猜不到返回 nil", Proc.version_hint("/mnt/us/easytier/bin/easytier-core") == nil)
+check("nil 路径不报错", Proc.version_hint(nil) == nil)
+
+--==== Proc.exec 的超时是真会生效的（本机没有 timeout 命令时跳过）====--
+do
+    if Proc.timeout_prefix(1) == "" then
+        print("(本机没有 timeout 命令，跳过超时测试)")
+    else
+        local t0 = os.time()
+        Proc.exec("sleep 30", 1)
+        local elapsed = os.time() - t0
+        check("超时生效：没等满 30 秒", elapsed < 15, elapsed .. " 秒")
+    end
+end
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

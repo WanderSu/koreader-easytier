@@ -310,5 +310,15 @@ do
         end)())
 end
 
+--==== 工具菜单：诊断与实测版本 ====--
+local tools_menu = find_item(menu_items.easytier, "工具")
+check("找到「工具」菜单", tools_menu ~= nil)
+check("工具里有「运行诊断」", find_item(tools_menu, "运行诊断") ~= nil)
+check("工具里有「查看 core 版本」", find_item(tools_menu, "查看 core 版本") ~= nil)
+
+--==== 这两个动作在假 UI 下不能报错（真机上它们曾经把 KOReader 拖退出）====--
+check("show_diagnostics 不报错", pcall(function() EasyTier:show_diagnostics() end))
+check("show_core_version 不报错", pcall(function() EasyTier:show_core_version() end))
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

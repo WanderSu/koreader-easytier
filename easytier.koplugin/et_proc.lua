@@ -78,8 +78,14 @@ end
 -- 通用工具
 --==========================================================================
 
-function Proc.exec(cmd)
+--- 跑一条 shell 命令。给了 seconds 就套一层系统 timeout：
+--- 外部命令卡住时界面线程不能被它拖住（诊断这类"串一堆命令"的地方必须带超时）。
+function Proc.exec(cmd, seconds)
     logger.dbg("EasyTier exec:", cmd)
+    if seconds then
+        local prefix = Proc.timeout_prefix(seconds)
+        if prefix ~= "" then cmd = prefix .. cmd end
+    end
     local h = io.popen(cmd .. " 2>&1")
     if not h then return false, "" end
     local out = h:read("*a") or ""
@@ -103,7 +109,7 @@ function Proc.run(bin, argv, timeout_seconds)
         if prefix ~= "" then parts[#parts + 1] = prefix end
     end
     parts[#parts + 1] = Config.shquote(bin)
-    for _, a in ipairs(argv or {}) do
+    for _i, a in ipairs(argv or {}) do
         parts[#parts + 1] = quote_arg(a)
     end
     return Proc.exec(table.concat(parts, " "))
@@ -112,7 +118,7 @@ end
 --- 某条命令是否存在（结果会缓存）
 function Proc.has(cmd)
     if cached_paths[cmd] ~= nil then return cached_paths[cmd] end
-    local _, out = Proc.exec("command -v " .. cmd)
+    local res, out = Proc.exec("command -v " .. cmd)
     local found = out ~= nil and out:gsub("%s", "") ~= ""
     cached_paths[cmd] = found
     return found
@@ -159,7 +165,7 @@ function Proc.search_dirs(cfg)
     if cfg and cfg.custom_bin_dir and cfg.custom_bin_dir ~= "" then
         table.insert(dirs, cfg.custom_bin_dir)
     end
-    for _, d in ipairs(Config.BIN_SEARCH_DIRS) do
+    for _i, d in ipairs(Config.BIN_SEARCH_DIRS) do
         table.insert(dirs, d)
     end
     return dirs
@@ -172,11 +178,11 @@ end
 
 function Proc.find(name, cfg)
     local dirs = Proc.search_dirs(cfg)
-    for _, d in ipairs(dirs) do
+    for _i, d in ipairs(dirs) do
         local p = d .. "/" .. name
         if util.pathExists(p) then return p end
     end
-    for _, d in ipairs(dirs) do
+    for _i, d in ipairs(dirs) do
         if is_dir(d) then
             for entry in lfs.dir(d) do
                 if entry ~= "." and entry ~= ".." then
@@ -191,7 +197,7 @@ function Proc.find(name, cfg)
     end
     -- 最后再退到 PATH
     if Proc.has(name) then
-        local _, out = Proc.exec("command -v " .. name)
+        local res, out = Proc.exec("command -v " .. name)
         if out and out:gsub("%s", "") ~= "" then
             return out:match("^(%S+)")
         end
@@ -202,7 +208,7 @@ end
 --- 给「安装说明 / 诊断」用的搜索报告
 function Proc.search_report(cfg)
     local lines = {}
-    for _, d in ipairs(Proc.search_dirs(cfg)) do
+    for _i, d in ipairs(Proc.search_dirs(cfg)) do
         lines[#lines + 1] = string.format("  %s %s", util.pathExists(d .. "/" .. Config.CORE_NAME) and "✓" or "✗", d)
     end
     return table.concat(lines, "\n")
@@ -238,13 +244,22 @@ function Proc.elf_info(path)
     return table.concat(parts, " / ")
 end
 
+--- 从路径里猜版本号，**不执行二进制**。
+--- 官方发布包解出来的目录带版本（easytier-linux-armv7-v2.6.4）；自己摆的目录一般猜不到。
+function Proc.version_hint(path)
+    local v = tostring(path or ""):match("[vV](%d+%.%d+%.%d+[%w%+%-~]*)")
+    return v and ("v" .. v) or nil
+end
+
+--- 实测版本：会真的执行一次二进制（自解压包在阅读器上要几秒），所以只在用户明确要求时调用；
+--- 两次尝试都带超时，卡住也不会把界面线程拖死。
 function Proc.version(path)
-    local ok, out = Proc.run(path, { "--version" })
+    local ok, out = Proc.run(path, { "--version" }, 5)
     if ok and out and out:gsub("%s", "") ~= "" then
         return out:match("^%s*(.-)%s*$")
     end
-    ok, out = Proc.run(path, { "--help" })
-    if ok and out then
+    ok, out = Proc.run(path, { "--help" }, 5)
+    if ok and out and out:gsub("%s", "") ~= "" then
         return out:match("^%s*([^\n]+)")
     end
     return nil
@@ -322,7 +337,7 @@ function Proc.start(cfg)
 
     local argv = Config.build_argv(cfg)
     local parts = {}
-    for _, a in ipairs(argv) do
+    for _i, a in ipairs(argv) do
         parts[#parts + 1] = quote_arg(a)
     end
 
@@ -397,7 +412,7 @@ end
 --- 清理所有残留的 easytier-core（包括不是本插件启动的）
 function Proc.kill_all(force)
     local pids = Proc.find_pids()
-    for _, pid in ipairs(pids) do
+    for _i, pid in ipairs(pids) do
         os.execute(string.format("kill -%s %d", force and "KILL" or "TERM", pid))
     end
     os.remove(Proc.PID_FILE)
@@ -414,7 +429,7 @@ function Proc.cli(cfg, args)
         return false, _("找不到 easytier-cli，无法读取状态。")
     end
     local argv = { "--rpc-portal", cfg.rpc_portal or "127.0.0.1:15888", "--no-trunc" }
-    for _, a in ipairs(args or {}) do
+    for _i, a in ipairs(args or {}) do
         argv[#argv + 1] = a
     end
     -- 必须带超时：easytier-cli 连不上 RPC 时可能一直等，而它是在界面线程里同步跑的
@@ -516,13 +531,13 @@ end
 -- 权限 / TUN / 防火墙
 --==========================================================================
 
-function Proc.is_root()
-    local _, out = Proc.exec("id -u")
+function Proc.is_root(seconds)
+    local res, out = Proc.exec("id -u", seconds)
     return (out or ""):match("^%s*0") ~= nil
 end
 
-function Proc.uname()
-    local _, out = Proc.exec("uname -m")
+function Proc.uname(seconds)
+    local res, out = Proc.exec("uname -m", seconds)
     return (out or ""):gsub("%s+$", "")
 end
 
@@ -545,8 +560,8 @@ function Proc.tun_state()
 end
 
 --- 内核是否编了 TUN（zcat /proc/config.gz）
-function Proc.kernel_tun()
-    local _, out = Proc.exec("(zcat /proc/config.gz 2>/dev/null || gunzip -c /proc/config.gz 2>/dev/null) | grep -E '^CONFIG_TUN'")
+function Proc.kernel_tun(seconds)
+    local res, out = Proc.exec("(zcat /proc/config.gz 2>/dev/null || gunzip -c /proc/config.gz 2>/dev/null) | grep -E '^CONFIG_TUN'", seconds)
     out = (out or ""):gsub("%s+$", "")
     if out == "" then return _("未知（读不到 /proc/config.gz）") end
     if out:find("CONFIG_TUN=y") or out:find("CONFIG_TUN=m") then
@@ -579,7 +594,7 @@ end
 function Proc.firewall_rule_present(iface)
     if not iface or iface == "" or not Proc.has("iptables") then return false end
     -- 不用管道 grep：直接在 Lua 里判断，避免管道让 timeout 只管到前一个命令
-    local _, out = Proc.exec("iptables -S INPUT 2>/dev/null")
+    local res, out = Proc.exec("iptables -S INPUT 2>/dev/null", 3)
     for line in tostring(out or ""):gmatch("[^\n]+") do
         if line:find("-i " .. iface, 1, true) then return true end
     end
@@ -591,35 +606,38 @@ end
 --==========================================================================
 
 function Proc.diagnostics(cfg)
+    logger.info("EasyTier: 开始收集诊断信息")
     local L = {}
     local function line(fmt, ...) L[#L + 1] = string.format(fmt, ...) end
 
     line("== 设备 ==")
-    local _, uname = Proc.exec("uname -a")
+    local res, uname = Proc.exec("uname -a", 3)
     line("%s", (uname or ""):gsub("%s+$", ""))
-    line("CPU 架构（uname -m）：%s", Proc.uname())
-    line("运行用户 uid：%s", Proc.is_root() and "0 (root)" or "非 root —— 需要一个能执行 iptables/mknod 的环境")
+    line("CPU 架构（uname -m）：%s", Proc.uname(3))
+    line("运行用户 uid：%s", Proc.is_root(3) and "0 (root)" or "非 root —— 需要一个能执行 iptables/mknod 的环境")
     local attr = lfs.attributes("/lib/libc.so.6")
     if attr then
-        local _, v = Proc.exec("grep -a -o 'GNU C Library[^\\\\]*' /lib/libc.so.6 | head -1")
+        local res, v = Proc.exec("grep -a -o 'GNU C Library[^\\\\]*' /lib/libc.so.6 | head -1", 3)
         line("系统 libc：%s", (v or ""):gsub("%s+$", ""))
     end
 
     line("")
     line("== 内核 TUN ==")
-    line("CONFIG_TUN：%s", Proc.kernel_tun())
+    line("CONFIG_TUN：%s", Proc.kernel_tun(3))
     line("/dev/net/tun：%s", util.pathExists("/dev/net/tun") and "存在" or "不存在")
 
     line("")
     line("== 二进制 ==")
-    for _, name in ipairs({ Config.CORE_NAME, Config.CLI_NAME }) do
+    for _i, name in ipairs({ Config.CORE_NAME, Config.CLI_NAME }) do
         local path = Proc.find(name, cfg)
         if path then
             local elf = Proc.elf_info(path)
             line("%s -> %s", name, path)
             line("   %s", elf or "?")
             if name == Config.CORE_NAME then
-                line("   版本：%s", Proc.version(path) or "读取失败")
+                -- 这里故意不执行二进制去问版本：自解压包在阅读器上要几秒，
+                -- 会把界面线程占住。要实测版本请用「工具 → 查看 core 版本」。
+                line("   版本：%s", Proc.version_hint(path) or "未实测（工具 → 查看 core 版本）")
             end
         else
             line("%s -> 未找到", name)
@@ -637,6 +655,8 @@ function Proc.diagnostics(cfg)
     else
         line("未运行")
     end
+
+    logger.info("EasyTier: 诊断信息收集完成")
 
     return table.concat(L, "\n")
 end

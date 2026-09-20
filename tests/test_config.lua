@@ -88,6 +88,39 @@ do
     check("列表字段默认是独立表", cfg.peers ~= Config.DEFAULTS.peers)
 end
 
+--==== 结构自检：不许把值丢进名为 _ 的变量（会遮蔽 gettext 的 _）====--
+-- 真事：Proc.kernel_tun 里 `local _, out = Proc.exec(...)` 把 gettext 的 _ 遮蔽成布尔值，
+-- 于是同函数里的 _("...") 变成「调用布尔值」而抛错，把诊断页连同 KOReader 一起拖退出。
+do
+    local names = { "et_config.lua", "et_proc.lua", "et_ui.lua", "main.lua" }
+    local bad, read = {}, 0
+    for _i, fname in ipairs(names) do
+        local f = io.open("easytier.koplugin/" .. fname, "r")
+        if f then
+            read = read + 1
+            local n = 0
+            for line in f:lines() do
+                n = n + 1
+                if not line:match('^%s*local%s+_%s*=%s*require%("gettext"%)') then
+                    if line:match("^%s*local%s+_,") or line:match("^%s*for%s+_,") or line:match(",%s*_%s*=") then
+                        bad[#bad + 1] = fname .. ":" .. n
+                    end
+                end
+            end
+            f:close()
+        end
+    end
+    check("读到了全部插件源文件", read == #names, read)
+    check("没有遮蔽 gettext 的 _ 的写法", #bad == 0, table.concat(bad, ", "))
+end
+
+--==== kernel_tun：以前必抛错（_ 被遮蔽），现在必须好好返回 ====--
+do
+    local ok, res = pcall(Proc.kernel_tun, 3)
+    check("kernel_tun 不抛错", ok, res)
+    check("kernel_tun 返回字符串", ok and type(res) == "string" and #res > 0, tostring(res))
+end
+
 --==== 参数生成：TUN + DHCP ====--
 do
     local cfg = base_cfg({ network_name = "abc", network_secret = "s3cr3t", ipv4 = "10.144.144.2" })

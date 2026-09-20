@@ -119,7 +119,7 @@ function Config.load()
     -- 为了让界面只留一个「初始节点」，旧值并入 peers，插件不再单独输出 -e。
     if cfg.external_node ~= "" then
         local dup = false
-        for _, p in ipairs(cfg.peers) do
+        for _i, p in ipairs(cfg.peers) do
             if p == cfg.external_node then dup = true end
         end
         if not dup then table.insert(cfg.peers, cfg.external_node) end
@@ -199,7 +199,7 @@ end
 local function is_ipv4(s)
     local a, b, c, d = s:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
     if not a then return false end
-    for _, o in ipairs({ a, b, c, d }) do
+    for _i, o in ipairs({ a, b, c, d }) do
         if #o > 3 or tonumber(o) > 255 then return false end
     end
     return true
@@ -351,14 +351,14 @@ function Config.build_argv(cfg)
         end
     end
 
-    for _, p in ipairs(cfg.peers) do opt("--peers", p) end
-    for _, n in ipairs(cfg.proxy_networks) do opt("--proxy-networks", n) end
+    for _i, p in ipairs(cfg.peers) do opt("--peers", p) end
+    for _i, n in ipairs(cfg.proxy_networks) do opt("--proxy-networks", n) end
     if cfg.no_listener then
         flag("--no-listener")
     else
-        for _, l in ipairs(cfg.listeners) do opt("--listeners", l) end
+        for _i, l in ipairs(cfg.listeners) do opt("--listeners", l) end
     end
-    for _, f in ipairs(cfg.port_forwards) do opt("--port-forward", f) end
+    for _i, f in ipairs(cfg.port_forwards) do opt("--port-forward", f) end
 
     opt("--default-protocol", cfg.default_protocol)
     if cfg.enable_kcp_proxy then flag("--enable-kcp-proxy") end
@@ -368,7 +368,7 @@ function Config.build_argv(cfg)
 
     opt("--console-log-level", cfg.log_level)
 
-    for _, a in ipairs(Config.split_args(cfg.extra_args)) do
+    for _i, a in ipairs(Config.split_args(cfg.extra_args)) do
         table.insert(argv, a)
     end
 
