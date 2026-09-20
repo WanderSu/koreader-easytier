@@ -11,7 +11,7 @@ EasyTier 组网插件 —— 配置模型（纯逻辑，不依赖 KOReader 界�
 注意：-d 是 --dhcp 而不是守护进程。
 --]]
 
-local _ = require("gettext")
+local _ = require("et_i18n").tr
 
 local Config = {}
 
@@ -238,70 +238,70 @@ end
 function Config.validate(cfg)
     local warn = nil
     if cfg.network_name == "" then
-        warn = _("未填写网络名称：所有未命名节点会落在同一个默认网络里，建议填写。")
+        warn = _("No network name set: unnamed nodes all end up in the same default network, so it is worth setting one.")
     end
     if cfg.mode == "tun" then
         if not cfg.dhcp then
             if cfg.ipv4 == "" then
-                return false, _("TUN 模式下需要填写本节点 IP，或改用 DHCP 自动分配。")
+                return false, _("TUN mode needs a node IP, or turn DHCP on.")
             end
             if not is_ipv4_or_cidr(cfg.ipv4) then
-                return false, _("节点 IP 格式不对：") .. cfg.ipv4 .. _("\n示例：10.144.144.2")
+                return false, _("Bad node IP: ") .. cfg.ipv4 .. _("\nExample: 10.144.144.2")
             end
         end
     else
         if not tonumber(cfg.socks5_port) then
-            return false, _("SOCKS5 端口必须是数字。")
+            return false, _("The SOCKS5 port must be a number.")
         end
     end
 
     for _i, p in ipairs(cfg.peers) do
         if not is_uri(p) then
-            local extra = _("\n示例：tcp://public.easytier.top:11010")
+            local extra = _("\nExample: tcp://public.easytier.top:11010")
             if Config.missing_scheme(p) then
-                extra = _("\n缺少协议前缀。要写成：tcp://") .. p
+                extra = _("\nMissing the protocol prefix. Write it as: tcp://") .. p
             end
-            return false, _("初始节点格式不对：") .. p .. extra
+            return false, _("Bad initial node: ") .. p .. extra
         end
     end
     for _i, net in ipairs(cfg.proxy_networks) do
         local from = net:match("^([^>]+)->")
         local target = from and net:match("->(.+)$") or net
         if not (is_cidr(from or net) and is_cidr(target)) then
-            return false, _("子网格式不对：") .. net .. _("\n示例：192.168.1.0/24")
+            return false, _("Bad subnet: ") .. net .. _("\nExample: 192.168.1.0/24")
         end
     end
     for _i, l in ipairs(cfg.listeners) do
         -- 允许三种官方写法：纯端口号、scheme://url、proto:port
         local ok_listener = l:match("^%d+$") or is_uri(l) or l:match("^%a+:%d+$") ~= nil
         if not ok_listener then
-            return false, _("监听地址格式不对：") .. l .. _("\n示例：tcp://0.0.0.0:11010 或 11010")
+            return false, _("Bad listener: ") .. l .. _("\nExample: tcp://0.0.0.0:11010 or 11010")
         end
     end
     for _i, f in ipairs(cfg.port_forwards) do
         local proto, src, dst = f:match("^(%a+)://([^/]+)/(.+)$")
         if not (proto and src and dst) then
-            return false, _("端口转发格式不对：") .. f
-                .. _("\n示例：tcp://127.0.0.1:8080/10.126.126.1:80")
+            return false, _("Bad port forward: ") .. f
+                .. _("\nExample: tcp://127.0.0.1:8080/10.126.126.1:80")
         end
     end
     if cfg.rpc_portal ~= "" and not cfg.rpc_portal:match("^%d+$")
         and not cfg.rpc_portal:match("^[%w%._%-]+:%d+$") then
-        return false, _("RPC 端口格式不对：") .. cfg.rpc_portal .. _("\n示例：127.0.0.1:15888")
+        return false, _("Bad RPC portal: ") .. cfg.rpc_portal .. _("\nExample: 127.0.0.1:15888")
     end
     if cfg.dev_name ~= "" and #cfg.dev_name > 15 then
-        return false, _("TUN 接口名不能超过 15 个字符（内核限制）。")
+        return false, _("The TUN interface name cannot exceed 15 characters (kernel limit).")
     end
     -- 主机名会用于魔法 DNS（<hostname>.et.net），实例名用于同一台机器上区分多个实例，
     -- 两者带空格都会带来麻烦（启动参数、展示、DNS 名字都不友好）
     if cfg.hostname:find("%s") then
-        return false, _("主机名里不要有空格：") .. cfg.hostname .. _("\n示例：kindle-kpw6")
+        return false, _("Hostname must not contain spaces: ") .. cfg.hostname .. _("\nExample: kindle-kpw6")
     end
     if cfg.instance_name:find("%s") then
-        return false, _("实例名里不要有空格：") .. cfg.instance_name .. _("\n示例：kindle-kpw6")
+        return false, _("Instance name must not contain spaces: ") .. cfg.instance_name .. _("\nExample: kindle-kpw6")
     end
     if tonumber(cfg.mtu) and tonumber(cfg.mtu) > 0 and tonumber(cfg.mtu) < 576 then
-        return false, _("MTU 太小了，建议留空或填 1280 以上。")
+        return false, _("MTU is too small; leave it empty or use 1280 or more.")
     end
     return true, nil, warn
 end
@@ -411,7 +411,7 @@ function Config.clip_text(text, max_bytes, max_line)
     end
     local joined = table.concat(out, "\n")
     if clipped then
-        joined = joined .. "\n\n…（内容过长，已截断）"
+        joined = joined .. _("\n\n… (truncated)")
     end
     return joined
 end
@@ -419,17 +419,17 @@ end
 --- 供状态页显示的一行摘要
 function Config.summary(cfg)
     local lines = {}
-    table.insert(lines, _("模式：") .. (cfg.mode == "tun" and _("TUN（全局路由）") or _("代理（无 TUN，SOCKS5 :") .. tostring(cfg.socks5_port) .. ")"))
-    table.insert(lines, _("网络名称：") .. (cfg.network_name ~= "" and cfg.network_name or _("(未设置)")))
-    table.insert(lines, _("节点 IP：") .. (cfg.mode == "proxy" and "-" or (cfg.dhcp and _("DHCP 自动") or cfg.ipv4)))
-    table.insert(lines, _("主机名：") .. (cfg.hostname ~= "" and cfg.hostname or _("(系统主机名)"))
-        .. "  |  " .. _("实例名：") .. cfg.instance_name)
-    table.insert(lines, _("对等节点：") .. (#cfg.peers > 0 and table.concat(cfg.peers, " ") or _("(无)")))
+    table.insert(lines, _("Mode: ") .. (cfg.mode == "tun" and _("TUN (full routing)") or _("Proxy (no TUN, SOCKS5 :") .. tostring(cfg.socks5_port) .. ")"))
+    table.insert(lines, _("Network name: ") .. (cfg.network_name ~= "" and cfg.network_name or _("(not set)")))
+    table.insert(lines, _("Node IP: ") .. (cfg.mode == "proxy" and "-" or (cfg.dhcp and _("DHCP (automatic)") or cfg.ipv4)))
+    table.insert(lines, _("Hostname: ") .. (cfg.hostname ~= "" and cfg.hostname or _("(system hostname)"))
+        .. "  |  " .. _("Instance: ") .. cfg.instance_name)
+    table.insert(lines, _("Peers: ") .. (#cfg.peers > 0 and table.concat(cfg.peers, " ") or _("(none)")))
     if #cfg.proxy_networks > 0 then
-        table.insert(lines, _("共享子网：") .. table.concat(cfg.proxy_networks, " "))
+        table.insert(lines, _("Subnets: ") .. table.concat(cfg.proxy_networks, " "))
     end
     if #cfg.port_forwards > 0 then
-        table.insert(lines, _("端口转发：") .. table.concat(cfg.port_forwards, " "))
+        table.insert(lines, _("Port forwards: ") .. table.concat(cfg.port_forwards, " "))
     end
     return table.concat(lines, "\n")
 end

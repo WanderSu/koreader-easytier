@@ -245,7 +245,7 @@ do
     for i = 1, 5000 do many[i] = "line " .. i end
     local capped = Config.clip_text(table.concat(many, "\n"), 4096, 400)
     check("总体积受控", #capped < 6000, #capped)
-    check("截断有提示", capped:find("已截断", 1, true) ~= nil)
+    check("截断有提示", capped:find("truncated", 1, true) ~= nil, capped:sub(-60))
 
     local cn = Config.clip_text(string.rep("中", 1000), 64 * 1024, 100)
     check("中文按 UTF-8 边界截断", cn:find("中", 1, true) ~= nil and #cn <= 400, #cn)
@@ -279,7 +279,8 @@ do
             print("ELF 识别结果: " .. info)
             check("识别为 ARM 架构", info:find("ARM", 1, true) ~= nil, info)
             check("识别为 32 位", info:find("32", 1, true) ~= nil, info)
-            check("识别为静态链接", info:find("静态链接", 1, true) ~= nil, info)
+            -- 界面语言不是中文时用英文源串（中文见 tests/test_i18n.lua）
+            check("识别为静态链接", info:find("statically linked", 1, true) ~= nil, info)
         end
     else
         print("(未提供 easytier-core 路径，跳过 ELF 测试)")

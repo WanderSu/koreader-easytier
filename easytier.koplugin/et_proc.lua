@@ -13,7 +13,7 @@ if not ok_ffiutil or type(ffiutil) ~= "table" then ffiutil = nil end
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local util = require("util")
-local _ = require("gettext")
+local _ = require("et_i18n").tr
 
 local Config = require("et_config")
 
@@ -211,30 +211,30 @@ end
 --- 读 ELF 头，判断架构 / 浮点 ABI / 是否静态链接
 function Proc.elf_info(path)
     local f = io.open(path, "rb")
-    if not f then return nil, _("无法打开文件") end
+    if not f then return nil, _("Cannot open the file") end
     local head = f:read(4096) or ""
     f:close()
     if #head < 40 or head:sub(1, 4) ~= "\127ELF" then
-        return nil, _("不是 ELF 可执行文件")
+        return nil, _("Not an ELF executable")
     end
     local function u8(i) return head:byte(i) end
     local function u16le(i) return u8(i) + u8(i + 1) * 256 end
     local function u32le(i)
         return u8(i) + u8(i + 1) * 256 + u8(i + 2) * 65536 + u8(i + 3) * 16777216
     end
-    local class = u8(5) == 1 and _("32 位") or _("64 位")
+    local class = u8(5) == 1 and _("32-bit") or _("64-bit")
     local machine = u16le(19)
     local arch = ({ [40] = "ARM", [183] = "AArch64", [3] = "x86", [62] = "x86_64", [8] = "MIPS" })[machine]
         or ("machine=" .. tostring(machine))
     local flags = u32le(37)
     local abi = ""
     if machine == 40 then
-        abi = (flags % 0x800 >= 0x400) and _("硬浮点 ABI") or _("软浮点 ABI")
+        abi = (flags % 0x800 >= 0x400) and _("hard-float ABI") or _("soft-float ABI")
     end
     local dynamic = head:find("ld-linux", 1, true) ~= nil or head:find("ld-musl", 1, true) ~= nil
     local parts = { class, arch }
     if abi ~= "" then parts[#parts + 1] = abi end
-    parts[#parts + 1] = dynamic and _("动态链接") or _("静态链接")
+    parts[#parts + 1] = dynamic and _("dynamically linked") or _("statically linked")
     return table.concat(parts, " / ")
 end
 
@@ -310,7 +310,7 @@ end
 function Proc.start(cfg)
     local core = Proc.find(Config.CORE_NAME, cfg)
     if not core then
-        return false, _("找不到 easytier-core。请先按「安装说明」把二进制放到设备上。")
+        return false, _("easytier-core not found. Put the binaries on the device first (see Installation).")
     end
     local dir, base = core:match("^(.*)/([^/]+)$")
     dir = dir or "."
@@ -352,7 +352,7 @@ function Proc.start(cfg)
 
     if not pid then
         local tail = Proc.tail_log(15)
-        return false, _("easytier-core 启动失败。日志末尾：\n\n") .. (tail ~= "" and tail or _("(日志为空)"))
+        return false, _("easytier-core failed to start. End of the log:\n\n") .. (tail ~= "" and tail or _("(log is empty)"))
     end
 
     if cfg.mode == "tun" and cfg.fix_firewall then
@@ -388,7 +388,7 @@ function Proc.stop(cfg, force)
     end
 
     if pid_alive(pid) then
-        return false, _("进程没有退出，PID ") .. tostring(pid)
+        return false, _("Process did not exit, PID ") .. tostring(pid)
     end
     os.remove(Proc.PID_FILE)
     return true
@@ -411,7 +411,7 @@ end
 function Proc.cli(cfg, args)
     local cli = Proc.find(Config.CLI_NAME, cfg)
     if not cli then
-        return false, _("找不到 easytier-cli，无法读取状态。")
+        return false, _("easytier-cli not found, cannot read the status.")
     end
     local argv = { "--rpc-portal", cfg.rpc_portal or "127.0.0.1:15888", "--no-trunc" }
     for _, a in ipairs(args or {}) do
@@ -548,11 +548,11 @@ end
 function Proc.kernel_tun()
     local _, out = Proc.exec("(zcat /proc/config.gz 2>/dev/null || gunzip -c /proc/config.gz 2>/dev/null) | grep -E '^CONFIG_TUN'")
     out = (out or ""):gsub("%s+$", "")
-    if out == "" then return _("未知（读不到 /proc/config.gz）") end
+    if out == "" then return _("unknown (/proc/config.gz not readable)") end
     if out:find("CONFIG_TUN=y") or out:find("CONFIG_TUN=m") then
-        return _("支持") .. " （" .. out:gsub("[^%w=]", " ") .. "）"
+        return _("supported") .. " （" .. out:gsub("[^%w=]", " ") .. "）"
     end
-    return _("不支持（内核关闭了 TUN）：") .. out
+    return _("Not supported (kernel has TUN disabled): ") .. out
 end
 
 function Proc.firewall_add(iface)

@@ -63,7 +63,9 @@ chmod +x "$OUT/easytier/bin/"* 2>/dev/null || true
 if [ -d "$ROOT/easytier.koplugin" ]; then
     cp -r "$ROOT/easytier.koplugin" "$OUT/koreader/plugins/"
     # 顺手带上说明文档，方便在设备上/离线时查
-    [ -f "$ROOT/README.md" ] && cp "$ROOT/README.md" "$OUT/koreader/plugins/easytier.koplugin/README.md"
+    for doc in README.md README.en.md; do
+        [ -f "$ROOT/$doc" ] && cp "$ROOT/$doc" "$OUT/koreader/plugins/easytier.koplugin/$doc"
+    done
 fi
 
 cat <<EOF

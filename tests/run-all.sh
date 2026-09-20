@@ -10,7 +10,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 BIN="${1:-}"
 fail=0
 
-for f in tests/test_config.lua tests/test_proc.lua tests/test_menu.lua; do
+for f in tests/test_config.lua tests/test_proc.lua tests/test_menu.lua tests/test_i18n.lua; do
     printf '\n===== %s =====\n' "$f"
     if lua "$f" $BIN; then
         :

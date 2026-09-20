@@ -15,7 +15,7 @@ local InputDialog = require("ui/widget/inputdialog")
 local UIManager = require("ui/uimanager")
 local TextViewer = require("ui/widget/textviewer")
 local logger = require("logger")
-local _ = require("gettext")
+local _ = require("et_i18n").tr
 
 local Config = require("et_config")
 
@@ -29,7 +29,7 @@ function UI.info(text, timeout)
 end
 
 function UI.busy(text)
-    local msg = InfoMessage:new{ text = text or _("处理中…") }
+    local msg = InfoMessage:new{ text = text or _("Working…") }
     UIManager:show(msg)
     UIManager:forceRePaint()
     return msg
@@ -39,8 +39,8 @@ end
 function UI.confirm(text, on_ok, ok_text)
     UIManager:show(ConfirmBox:new{
         text = text,
-        ok_text = ok_text or _("确定"),
-        cancel_text = _("取消"),
+        ok_text = ok_text or _("OK"),
+        cancel_text = _("Cancel"),
         ok_callback = on_ok,
     })
 end
@@ -59,7 +59,7 @@ function UI.choose(title, options)
         } }
     end
     buttons[#buttons + 1] = { {
-        text = _("取消"),
+        text = _("Cancel"),
         callback = function() UIManager:close(dialog) end,
     } }
     dialog = ButtonDialog:new{
@@ -86,12 +86,12 @@ function UI.input_text(opts)
         buttons = {
             {
                 {
-                    text = _("取消"),
+                    text = _("Cancel"),
                     id = "close",
                     callback = function() UIManager:close(dialog) end,
                 },
                 {
-                    text = _("保存"),
+                    text = _("Save"),
                     is_enter_default = true,
                     callback = function()
                         local text = dialog:getInputText() or ""
@@ -109,15 +109,15 @@ end
 --- 只读长文本页（状态 / 日志 / 诊断这类）。
 --- opts: title, text 或 build=function() -> string, monospace=false 可用非等宽字体
 function UI.show_text(opts)
-    local title = opts.title or _("信息")
+    local title = opts.title or _("Info")
     logger.info(string.format("EasyTier: 打开页面「%s」", tostring(title)))
 
     -- 1) 生成内容：出错也只是弹提示
     local ok, text = pcall(opts.build or function() return opts.text end)
     if not ok then
         logger.err("EasyTier: 生成页面内容失败（" .. tostring(title) .. "）：" .. tostring(text))
-        UI.info(_("生成页面内容时出错：\n") .. tostring(text)
-            .. _("\n\n（详情已写入 KOReader 的 crash.log）"), 20)
+        UI.info(_("Failed to build the page content:\n") .. tostring(text)
+            .. _("\n\n(Details were written to KOReader's crash.log.)"), 20)
         return
     end
 
@@ -134,7 +134,7 @@ function UI.show_text(opts)
     })
     if not viewer_ok or not viewer then
         logger.err("EasyTier: 页面控件创建失败（" .. tostring(title) .. "）：" .. tostring(viewer))
-        UI.info(_("打不开页面控件，先按纯文本显示：\n\n") .. tostring(viewer) .. "\n\n"
+        UI.info(_("Could not open the viewer widget; showing plain text instead:\n\n") .. tostring(viewer) .. "\n\n"
             .. clipped:sub(1, 900), 30)
         return
     end
@@ -143,7 +143,7 @@ function UI.show_text(opts)
     local show_ok, err = pcall(UIManager.show, UIManager, viewer)
     if not show_ok then
         logger.err("EasyTier: 页面显示失败（" .. tostring(title) .. "）：" .. tostring(err))
-        UI.info(_("页面显示失败：\n") .. tostring(err) .. "\n\n" .. clipped:sub(1, 900), 30)
+        UI.info(_("Failed to show the page:\n") .. tostring(err) .. "\n\n" .. clipped:sub(1, 900), 30)
     end
 end
 
