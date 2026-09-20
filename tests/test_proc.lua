@@ -314,6 +314,135 @@ do
     check("非 ELF 文件被识别出来", bad == nil)
 end
 
+--==== 停止判定要和清理判定一致（/proc 里还有这个 PID，但它已经不是我们的 core）====--
+do
+    local util = require("util")                       -- 测试桩
+    local real_pathExists, real_open, real_read_pid = util.pathExists, io.open, Proc.read_pid
+    local kill_stub = os.execute                       -- 上面已把 os.execute 换成记录命令的桩
+
+    local ZOMBIE = 4242
+    local empty_path, core_path = "out/test-cmdline-empty.txt", "out/test-cmdline-core.txt"
+    local f = io.open(empty_path, "w"); f:write(""); f:close()                          -- 僵尸：cmdline 空
+    f = io.open(core_path, "w"); f:write("easytier-core --network-name abc"); f:close() -- 活着：有名字
+
+    util.pathExists = function(p)
+        if p == "/proc/" .. ZOMBIE then return true end
+        return real_pathExists(p)
+    end
+    Proc.read_pid = function() return ZOMBIE end
+
+    local cfg = { mode = "tun", dev_name = "easytun" }
+
+    -- (1) 进程被杀成僵尸 → 不该报「没能完全停掉」
+    local alive = true
+    io.open = function(path, mode)
+        if path == "/proc/" .. ZOMBIE .. "/cmdline" then
+            return real_open(alive and core_path or empty_path, mode or "r")
+        end
+        return real_open(path, mode)
+    end
+    os.execute = function(cmd)
+        if tostring(cmd):find("kill %-") then alive = false end
+        return kill_stub(cmd)
+    end
+    local ok, err = Proc.stop(cfg, true)
+    check("僵尸/PID 复用不算「没能完全停掉」", ok == true, err)
+
+    -- (2) 进程真的杀不掉 → 必须如实报错
+    io.open = function(path, mode)
+        if path == "/proc/" .. ZOMBIE .. "/cmdline" then
+            return real_open(core_path, mode or "r")
+        end
+        return real_open(path, mode)
+    end
+    local ok2, err2 = Proc.stop(cfg, true)
+    check("真的没退出时要如实报错", ok2 == false and tostring(err2):find("没有退出", 1, true) ~= nil, err2)
+
+    io.open = real_open
+    util.pathExists = real_pathExists
+    Proc.read_pid = real_read_pid
+    os.execute = kill_stub
+    os.remove(empty_path)
+    os.remove(core_path)
+end
+
+--==== 日志瘦身：超上限只留最近部分（长跑的设备上日志会一直追加）====--
+do
+    local path = "out/test-trim.log"
+    local f = io.open(path, "w")
+    for i = 1, 4000 do f:write(string.format("第 %d 行日志，用来把文件撑过上限\n", i)) end
+    f:close()
+
+    local util = require("util")
+    local real_pathExists = util.pathExists
+    local real_log_path, real_log_size = Proc.log_path, Proc.log_file_size
+    -- 这个桩只对假二进制返回 true，临时日志文件得走真实判断（真机上 pathExists 本来就是真的）
+    util.pathExists = function(p)
+        if real_pathExists(p) then return true end
+        local h = io.open(p, "r")
+        if h then
+            h:close()
+            return true
+        end
+        return false
+    end
+    Proc.log_path = function() return path end
+    Proc.log_file_size = function()
+        local h = io.open(path, "r")
+        if not h then return 0 end
+        local n = h:seek("end")
+        h:close()
+        return n
+    end
+
+    local before = Proc.log_file_size()
+    check("测试日志确实够大", before > 100 * 1024, before)
+    check("没超上限时不动它", Proc.trim_log(before + 1) == false)
+    local trimmed, reported = Proc.trim_log(1024, 50)
+    check("超上限会瘦身", trimmed == true, tostring(trimmed))
+    check("报告的是瘦身前的字节数", reported == before, tostring(reported))
+    local after = Proc.log_file_size()
+    check("瘦身后明显变小", after < before / 4, after)
+    check("保留的是最近的行", Proc.tail_file(path, 2, 4096):find("4000", 1, true) ~= nil,
+        Proc.tail_file(path, 2, 4096))
+
+    Proc.log_path, Proc.log_file_size = real_log_path, real_log_size
+    util.pathExists = real_pathExists
+    os.remove(path)
+end
+
+--==== 清理残留：/proc 扫不到时，pidfile 里那个确认还活着的也要算上 ====--
+do
+    local util = require("util")
+    local real_pathExists, real_open, real_read_pid = util.pathExists, io.open, Proc.read_pid
+    local ZOMBIE = 4343
+    local core_path = "out/test-cmdline-core2.txt"
+    local f = io.open(core_path, "w"); f:write("easytier-core --network-name abc"); f:close()
+
+    util.pathExists = function(p)
+        if p == "/proc/" .. ZOMBIE then return true end
+        return real_pathExists(p)
+    end
+    io.open = function(path, mode)
+        if path == "/proc/" .. ZOMBIE .. "/cmdline" then
+            return real_open(core_path, mode or "r")
+        end
+        return real_open(path, mode)
+    end
+    Proc.read_pid = function() return ZOMBIE end
+
+    reset()
+    local n = Proc.kill_all(true)
+    check("清理时把 pidfile 里还活着的那个也算上", n == 1, n)
+    check("确实发了 kill 命令", any_command_matching("kill %-KILL " .. ZOMBIE) ~= nil,
+        table.concat(commands, "\n"))
+
+    io.open = real_open
+    util.pathExists = real_pathExists
+    Proc.read_pid = real_read_pid
+    os.remove(core_path)
+end
+
 os.execute = real_os_execute
 
 --==== 诊断：绝不执行二进制、命令都带超时 ====--

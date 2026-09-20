@@ -321,6 +321,47 @@ function Proc.is_running(cfg)
     return Proc.pid(cfg) ~= nil
 end
 
+--==========================================================================
+-- 日志体积
+--==========================================================================
+
+--- 日志上限：长跑的设备上 /mnt/us 空间有限，easytier-core 在 info 级别下几小时就能写几十 MB。
+--- 超过上限就只保留最近若干行（前面的丢掉，并留一行说明）。
+Proc.LOG_MAX_BYTES = 1024 * 1024
+Proc.LOG_KEEP_LINES = 1500
+
+--- 人类可读的大小
+function Proc.human_size(bytes)
+    bytes = tonumber(bytes) or 0
+    if bytes >= 1024 * 1024 then
+        return string.format("%.1f MB", bytes / (1024 * 1024))
+    end
+    return string.format("%.0f KB", bytes / 1024)
+end
+
+--- 日志超限就瘦身。返回 trimmed（布尔）, 处理前的字节数
+function Proc.trim_log(max_bytes, keep_lines)
+    local path = Proc.log_path()
+    local size = Proc.log_file_size()
+    max_bytes = max_bytes or Proc.LOG_MAX_BYTES
+    if size <= max_bytes then return false, size end
+
+    keep_lines = keep_lines or Proc.LOG_KEEP_LINES
+    local tail = Proc.tail_file(path, keep_lines, 256 * 1024)
+    local f = io.open(path, "w")
+    if not f then return false, size end
+    f:write(string.format(_("（日志超过 %s 上限，只保留最近 %d 行）\n"),
+        Proc.human_size(max_bytes), keep_lines))
+    f:write(tail)
+    f:close()
+    logger.info(string.format("EasyTier: 日志瘦身 %d -> %d 字节", size, Proc.log_file_size()))
+    return true, size
+end
+
+--==========================================================================
+-- 进程控制
+--==========================================================================
+
 --- 启动 core。返回 ok, pid 或错误信息
 function Proc.start(cfg)
     local core = Proc.find(Config.CORE_NAME, cfg)
@@ -331,6 +372,8 @@ function Proc.start(cfg)
     dir = dir or "."
     local log = Proc.log_path()
     Proc.data_dir()
+    -- 上一轮的日志可能已经很大了：启动前瘦身，别让日志把用户分区吃掉
+    Proc.trim_log()
 
     -- vfat 上不一定有执行位，顺手 chmod 一下（没权限时失败也无所谓）
     os.execute("chmod +x " .. Config.shquote(core))
@@ -386,14 +429,14 @@ function Proc.stop(cfg, force)
     end
 
     os.execute(string.format("kill -TERM %d", pid))
-    for _ = 1, 25 do
-        if not pid_alive(pid) then break end
+    for _i = 1, 25 do
+        if not pid_is_core(pid) then break end
         Proc.sleep(0.2)
     end
-    if pid_alive(pid) then
+    if pid_is_core(pid) then
         os.execute(string.format("kill -KILL %d", pid))
-        for _ = 1, 10 do
-            if not pid_alive(pid) then break end
+        for _i = 1, 10 do
+            if not pid_is_core(pid) then break end
             Proc.sleep(0.2)
         end
     end
@@ -402,16 +445,32 @@ function Proc.stop(cfg, force)
         Proc.firewall_del(cfg.dev_name)
     end
 
-    if pid_alive(pid) then
+    os.remove(Proc.PID_FILE)
+    -- 存活判定必须和 find_pids / kill_all 用同一个：只看 /proc/<pid> 在不在会踩两个坑——
+    -- 被杀成僵尸的进程 /proc 目录还在（cmdline 却是空的），PID 被复用也会被误判成「还在跑」。
+    -- 结果就是「停止说没停掉、清理又说 0 个进程」这种自相矛盾。
+    if pid_is_core(pid) then
         return false, _("进程没有退出，PID ") .. tostring(pid)
     end
-    os.remove(Proc.PID_FILE)
     return true
 end
 
 --- 清理所有残留的 easytier-core（包括不是本插件启动的）
 function Proc.kill_all(force)
     local pids = Proc.find_pids()
+    -- /proc 扫描有可能扫不到（例如 lfs 打不开 /proc）：pidfile 里那个确认还活着就一起处理，
+    -- 免得出现「停止说没停掉、清理又说 0 个进程」这种自相矛盾
+    local from_file = Proc.read_pid()
+    if from_file and pid_is_core(from_file) then
+        local dup = false
+        for _i, pid in ipairs(pids) do
+            if pid == from_file then
+                dup = true
+                break
+            end
+        end
+        if not dup then table.insert(pids, from_file) end
+    end
     for _i, pid in ipairs(pids) do
         os.execute(string.format("kill -%s %d", force and "KILL" or "TERM", pid))
     end

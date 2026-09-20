@@ -239,6 +239,8 @@ function EasyTier:onNetworkDisconnected()
 end
 
 function EasyTier:onResume()
+    -- 回到前台时顺手给日志瘦身（日志是追加写的，长跑会一直涨）
+    Proc.trim_log()
     if self.cfg.watchdog and self.cfg.active and not Proc.is_running(self.cfg) then
         UIManager:scheduleIn(5, function() self:auto_start("resume-watchdog") end)
     end
@@ -308,14 +310,24 @@ function EasyTier:show_status()
 end
 
 function EasyTier:show_log()
+    -- 日志是追加写的，长跑会很大：打开页面时顺手瘦身
+    local trimmed, before = Proc.trim_log()
     UI.show_text{
         title = _("EasyTier 日志"),
         build = function()
+            local size = Proc.log_file_size()
+            local head = string.format(
+                _("文件：%s\n大小：%s\n日志级别：%s（可在「配置 → 进阶 → 日志级别」调高以减少输出）\n"),
+                Proc.log_path(), Proc.human_size(size), tostring(self.cfg.log_level))
+            if trimmed then
+                head = head .. string.format(_("（打开时日志已超上限，只保留了最近部分：%s → %s）\n"),
+                    Proc.human_size(before), Proc.human_size(size))
+            end
             local text = Proc.tail_log(250)
             if text == "" then
                 text = _("(暂无日志)\n\n启动一次之后这里会有 easytier-core 的输出。")
             end
-            return text
+            return head .. "\n" .. text
         end,
     }
 end
