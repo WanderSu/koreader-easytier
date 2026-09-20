@@ -199,6 +199,36 @@ walk(menu_items.easytier, "easytier")
 check("菜单树有内容", leaves > 20, leaves)
 print(string.format("菜单：%d 个叶子项，%d 个分组", leaves, groups))
 
+--==== 主机名要放在「配置」一级（常用项，不要藏进「进阶」）====--
+
+local function menu_title(item)
+    if type(item.text) == "string" then return item.text end
+    local ok, res = pcall(item.text_func)
+    return ok and type(res) == "string" and res or nil
+end
+
+local function find_item(parent, title)
+    for _, item in ipairs((parent and parent.sub_item_table) or {}) do
+        if menu_title(item) == title then return item end
+    end
+    return nil
+end
+
+local cfg_menu = find_item(menu_items.easytier, "配置")
+check("找到「配置」菜单", cfg_menu ~= nil)
+local adv_menu = cfg_menu and find_item(cfg_menu, "进阶")
+check("找到「进阶」子菜单", adv_menu ~= nil)
+
+local function lists_hostname(menu)
+    for _, item in ipairs((menu and menu.sub_item_table) or {}) do
+        local title = menu_title(item) or ""
+        if title:find("主机名：", 1, true) then return true end
+    end
+    return false
+end
+check("主机名在「配置」一级", lists_hostname(cfg_menu))
+check("「进阶」里不再有主机名", not lists_hostname(adv_menu))
+
 --==== 其它入口不能炸 ====--
 
 check("stopPlugin 在未运行时返回 true", EasyTier:stopPlugin(false) == true)

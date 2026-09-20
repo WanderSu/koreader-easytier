@@ -573,6 +573,24 @@ function EasyTier:addToMainMenu(menu_items)
                         end,
                     },
                     {
+                        text_func = function()
+                            local name = self.cfg.hostname ~= ""
+                                and self.cfg.hostname
+                                or (Proc.sys_hostname() or _("(系统主机名)"))
+                            return string.format(_("主机名：%s"), name)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(touchmenu_instance)
+                            self:edit_field(touchmenu_instance, "hostname", {
+                                title = _("主机名"),
+                                hint = "kindle-kpw6",
+                                description = _("对端节点列表里显示的就是这个名字，所以常改就放在这里。\n"
+                                    .. "留空则用系统主机名（Kindle 上通常是 kindle）。\n"
+                                    .. "不要用空格，用横线代替；开了魔法 DNS 时会作为 <主机名>.et.net 用。"),
+                            })
+                        end,
+                    },
+                    {
                         text = _("进阶"),
                         sub_item_table = {
                             {
@@ -653,24 +671,6 @@ function EasyTier:addToMainMenu(menu_items)
                             },
                             {
                                 text_func = function()
-                                    local name = self.cfg.hostname ~= ""
-                                        and self.cfg.hostname
-                                        or (Proc.sys_hostname() or _("(系统主机名)"))
-                                    return string.format(_("主机名：%s"), name)
-                                end,
-                                keep_menu_open = true,
-                                callback = function(touchmenu_instance)
-                                    self:edit_field(touchmenu_instance, "hostname", {
-                                        title = _("主机名"),
-                                        hint = "kindle-kpw6",
-                                        description = _("对端节点列表里显示的就是这个名字。\n"
-                                            .. "留空则用系统主机名（Kindle 上通常是 kindle）。\n"
-                                            .. "不要用空格，用横线代替；开了魔法 DNS 时会作为 <主机名>.et.net 用。"),
-                                    })
-                                end,
-                            },
-                            {
-                                text_func = function()
                                     return string.format(_("实例名：%s"), self.cfg.instance_name)
                                 end,
                                 keep_menu_open = true,
@@ -679,7 +679,7 @@ function EasyTier:addToMainMenu(menu_items)
                                         title = _("实例名"),
                                         hint = "kindle",
                                         description = _("只用于在同一台机器上区分多个实例，对端看不到它。\n"
-                                            .. "想改对端看到的名字，请改上面的「主机名」。"),
+                                            .. "想改对端看到的名字，请改「配置 → 主机名」。"),
                                     })
                                 end,
                             },
