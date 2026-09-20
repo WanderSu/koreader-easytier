@@ -67,8 +67,9 @@ if [ -d "$ROOT/easytier.koplugin" ]; then
 fi
 
 # Release 资产：插件本体 + 说明文档打成一个 zip
+# 注意：用相对路径调用（原生 python 不认识 MSYS 的 /e/... 这种路径）
 if command -v python >/dev/null 2>&1; then
-    python "$ROOT/tools/pack-release.py" >/dev/null && say "已生成 $OUT/easytier.koplugin.zip"
+    (cd "$ROOT" && python tools/pack-release.py >/dev/null) && say "已生成 $OUT/easytier.koplugin.zip"
 fi
 
 cat <<EOF
