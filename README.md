@@ -43,7 +43,7 @@ koreader-easytier/
 
 先取插件本体，二选一：
 
-* 下载本仓库 Release 里的 **`easytier.koplugin.zip`**，解压得到 `easytier.koplugin/` 目录；或
+* 下载 [最新 Release](https://github.com/WanderSu/koreader-easytier/releases/latest) 里的 **`easytier.koplugin.zip`**，解压得到 `easytier.koplugin/` 目录；或
 * 直接把仓库里的 `easytier.koplugin/` 目录拷出来。
 
 EasyTier 的二进制不随插件分发（体积 8MB+，且会随上游更新），用脚本一键准备（依赖 `unzip`、`curl`）：
