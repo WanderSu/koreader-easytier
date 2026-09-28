@@ -363,7 +363,11 @@ end
 --==========================================================================
 
 --- 启动 core。返回 ok, pid 或错误信息
+--- 幂等：已经在跑就直接返回现有 PID，不重复拉起（菜单、手势、Wi-Fi、看门狗可能同时/连续触发）
 function Proc.start(cfg)
+    local running = Proc.pid(cfg)
+    if running then return true, running end
+
     local core = Proc.find(Config.CORE_NAME, cfg)
     if not core then
         return false, _("找不到 easytier-core。请先按「安装说明」把二进制放到设备上。")
@@ -425,6 +429,10 @@ function Proc.stop(cfg, force)
     local pid = Proc.pid(cfg)
     if not pid then
         os.remove(Proc.PID_FILE)
+        -- 进程已经不在了，但上次留下的防火墙规则可能还在：顺手撤掉（只动插件自己加的那条）
+        if cfg and cfg.mode == "tun" then
+            Proc.firewall_del(cfg.dev_name)
+        end
         return true
     end
 
@@ -674,6 +682,17 @@ function Proc.diagnostics(cfg)
     line("%s", (uname or ""):gsub("%s+$", ""))
     line("CPU 架构（uname -m）：%s", Proc.uname(3))
     line("运行用户 uid：%s", Proc.is_root(3) and "0 (root)" or "非 root —— 需要一个能执行 iptables/mknod 的环境")
+    -- KOReader 与设备信息：排查兼容性问题时第一眼要看的东西（拿不到就算了，不能因此报错）
+    local v_ok, Version = pcall(require, "version")
+    if v_ok and type(Version) == "table" and Version.getCurrentRevision then
+        local r_ok, rev = pcall(function() return Version:getCurrentRevision() end)
+        line("KOReader：%s", (r_ok and rev) or "未知")
+    end
+    local d_ok, Device = pcall(require, "device")
+    if d_ok and type(Device) == "table" then
+        local p_ok, plat = pcall(function() return Device:getPlatform() end)
+        line("设备平台：%s（机型 %s）", (p_ok and plat) or "未知", tostring(Device.model or "未知"))
+    end
     local attr = lfs.attributes("/lib/libc.so.6")
     if attr then
         local res, v = Proc.exec("grep -a -o 'GNU C Library[^\\\\]*' /lib/libc.so.6 | head -1", 3)
@@ -684,6 +703,18 @@ function Proc.diagnostics(cfg)
     line("== 内核 TUN ==")
     line("CONFIG_TUN：%s", Proc.kernel_tun(3))
     line("/dev/net/tun：%s", util.pathExists("/dev/net/tun") and "存在" or "不存在")
+    if Proc.has("iptables") then
+        line("iptables：存在（启动时会为 TUN 接口放行入向包）")
+    else
+        line("iptables：不存在（Kindle 防火墙适配不可用，其余功能不受影响）")
+    end
+
+    line("")
+    line("== 模式与日志 ==")
+    line("当前模式：%s", (cfg and cfg.mode == "proxy")
+        and "代理（--no-tun，只有显式走 SOCKS5 / 端口转发的流量进虚拟网）"
+        or "TUN（整机走虚拟网）")
+    line("日志文件：%s（%s）", Proc.log_path(), Proc.human_size(Proc.log_file_size()))
 
     line("")
     line("== 二进制 ==")

@@ -320,5 +320,81 @@ check("工具里有「查看 core 版本」", find_item(tools_menu, "查看 core
 check("show_diagnostics 不报错", pcall(function() EasyTier:show_diagnostics() end))
 check("show_core_version 不报错", pcall(function() EasyTier:show_core_version() end))
 
+--==== 自动启动：意图重确认 + 去重 + 用户操作后作废 + 失败限流 ====--
+do
+    local Proc = require("et_proc")
+    local real_is_running, real_start = Proc.is_running, Proc.start
+    local real_find, real_tun, real_verify = Proc.find, Proc.tun_state, Proc.verify_started
+    local start_calls = 0
+    Proc.is_running = function() return false end
+    Proc.start = function() start_calls = start_calls + 1 return true, 4321 end
+    Proc.find = function() return "out/easytier-core" end
+    Proc.tun_state = function() return "created" end
+    Proc.verify_started = function() return true, "rpc" end
+
+    EasyTier.cfg.mode = "tun"
+    EasyTier.cfg.start_on_wifi = true
+    EasyTier.cfg.watchdog = false
+    EasyTier.cfg.active = false
+
+    -- 同一个理由重复触发，只排一个任务
+    scheduled = {}
+    EasyTier.pending_starts = {}
+    EasyTier:onNetworkConnected()
+    EasyTier:onNetworkConnected()
+    EasyTier:onNetworkConnected()
+    check("Wi-Fi 事件重复触发只排一个启动任务", #scheduled == 1, #scheduled)
+
+    -- 到点时用户已经把开关关掉了 → 不启动
+    EasyTier.cfg.start_on_wifi = false
+    start_calls = 0
+    local queued = scheduled[1].fn
+    scheduled = {}
+    EasyTier.pending_starts = {}
+    queued()
+    check("到点时用户已关掉开关就不再自动启动", start_calls == 0, tostring(start_calls))
+
+    -- 用户手动停止（作废定时任务）→ 之前排下的任务不再启动
+    EasyTier.cfg.start_on_wifi = true
+    EasyTier.cfg.active = true
+    scheduled = {}
+    EasyTier.pending_starts = {}
+    EasyTier:onNetworkConnected()
+    check("先排下了一个启动任务", #scheduled == 1, #scheduled)
+    EasyTier:cancel_pending_auto_start()
+    start_calls = 0
+    scheduled[1].fn()
+    check("用户停止后，之前排下的启动任务作废", start_calls == 0, tostring(start_calls))
+
+    -- 连续失败到上限后不再自动重试
+    Proc.start = function() start_calls = start_calls + 1 return false, "启动失败（测试）" end
+    EasyTier.auto_start_fails = 0
+    for _i = 1, EasyTier.AUTO_START_MAX_FAILS do
+        EasyTier.auto_start_next_at = nil
+        EasyTier:auto_start("wifi-connected")
+    end
+    local calls_at_limit = start_calls
+    check("失败次数记到了上限", EasyTier.auto_start_fails == EasyTier.AUTO_START_MAX_FAILS,
+        tostring(EasyTier.auto_start_fails))
+    EasyTier.auto_start_next_at = nil
+    EasyTier:auto_start("wifi-connected")
+    check("连续失败到上限后不再自动重试", start_calls == calls_at_limit, tostring(start_calls))
+
+    -- 冷却期内不重试（避免事件密集时反复拉起）
+    EasyTier.auto_start_fails = 0
+    EasyTier.auto_start_next_at = os.time() + 30
+    local calls_before_cooldown = start_calls
+    EasyTier:auto_start("wifi-connected")
+    check("冷却期内不重试", start_calls == calls_before_cooldown, tostring(start_calls))
+
+    Proc.is_running, Proc.start = real_is_running, real_start
+    Proc.find, Proc.tun_state, Proc.verify_started = real_find, real_tun, real_verify
+    EasyTier.auto_start_fails = 0
+    EasyTier.auto_start_next_at = nil
+    EasyTier.pending_starts = {}
+    EasyTier.cfg.start_on_wifi = false
+    EasyTier.cfg.active = false
+end
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

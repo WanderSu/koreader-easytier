@@ -443,6 +443,54 @@ do
     os.remove(core_path)
 end
 
+--==== 启动幂等：已经在跑就不重复拉起 ====--
+do
+    local util = require("util")
+    local real_pathExists, real_open, real_read_pid = util.pathExists, io.open, Proc.read_pid
+    local LIVE = 5252
+    local core_path = "out/test-cmdline-live.txt"
+    local f = io.open(core_path, "w"); f:write("easytier-core --network-name abc"); f:close()
+
+    util.pathExists = function(p)
+        if p == "/proc/" .. LIVE then return true end
+        return real_pathExists(p)
+    end
+    io.open = function(path, mode)
+        if path == "/proc/" .. LIVE .. "/cmdline" then return real_open(core_path, mode or "r") end
+        return real_open(path, mode)
+    end
+    Proc.read_pid = function() return LIVE end
+
+    reset()
+    local ok, pid = Proc.start(base({ mode = "tun", dev_name = "easytier0" }))
+    check("已经在跑时 start 直接算成功", ok == true, tostring(ok))
+    check("返回现有 PID 而不是再拉一个", pid == LIVE, tostring(pid))
+    check("没有发出任何启动命令", #commands == 0, table.concat(commands, " | "))
+
+    io.open = real_open
+    util.pathExists = real_pathExists
+    Proc.read_pid = real_read_pid
+    os.remove(core_path)
+end
+
+--==== 停止时进程已经不在了：遗留的防火墙规则也要撤掉 ====--
+do
+    local util = require("util")
+    local real_pathExists, real_read_pid = util.pathExists, Proc.read_pid
+    util.pathExists = function() return false end -- /proc 里什么都没有
+    Proc.read_pid = function() return nil end
+
+    reset()
+    local ok = Proc.stop(base({ mode = "tun", dev_name = "easytier0" }), true)
+    check("没有进程时 stop 仍算成功", ok == true, tostring(ok))
+    check("顺手撤掉遗留的防火墙规则",
+        any_command_matching("iptables %-D INPUT %-i 'easytier0' %-j ACCEPT") ~= nil,
+        table.concat(commands, " | "))
+
+    util.pathExists = real_pathExists
+    Proc.read_pid = real_read_pid
+end
+
 os.execute = real_os_execute
 
 --==== 诊断：绝不执行二进制、命令都带超时 ====--

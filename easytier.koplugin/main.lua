@@ -49,7 +49,7 @@ function EasyTier:init()
     if self.cfg.autostart then
         self.cfg.active = true
         Config.save(self.cfg)
-        UIManager:scheduleIn(3, function() self:auto_start("koreader-start") end)
+        self:schedule_auto_start(3, "koreader-start")
     elseif self.cfg.active then
         -- 上次是运行状态但用户没开自启：本次会话从「不想要它运行」开始
         self.cfg.active = false
@@ -76,8 +76,71 @@ end
 -- 启停
 --==========================================================================
 
+-- 自动启动限流：连续失败这么多次就停手，失败后至少隔这么久才再试
+EasyTier.AUTO_START_MAX_FAILS = 3
+EasyTier.AUTO_START_COOLDOWN = 60
+
+--- 排一个自动启动。
+--- 同一个理由只留一个待执行任务（Wi-Fi 事件可能短时间重复触发），
+--- 并用「代数」记住取消：用户手动启动/停止之后，之前排下的定时器一律作废。
+function EasyTier:schedule_auto_start(delay, reason)
+    self.pending_starts = self.pending_starts or {}
+    if self.pending_starts[reason] then return end
+    self.pending_starts[reason] = true
+    local gen = self.pending_gen or 0
+    UIManager:scheduleIn(delay, function()
+        if (self.pending_gen or 0) ~= gen then return end -- 期间用户手动操作过，作废
+        self.pending_starts[reason] = nil
+        self:auto_start(reason)
+    end)
+end
+
+--- 用户手动启动/停止时调用：把之前排下的自动启动全部作废
+function EasyTier:cancel_pending_auto_start()
+    self.pending_gen = (self.pending_gen or 0) + 1
+    self.pending_starts = {}
+end
+
+--- 定时器是几秒前排的，期间用户可能已经手动停掉或关了开关：触发时再确认一次意图
+function EasyTier:auto_start_allowed(reason)
+    if reason == "wifi-connected" then
+        return self.cfg.start_on_wifi or (self.cfg.watchdog and self.cfg.active)
+    end
+    if reason == "resume-watchdog" then
+        return self.cfg.watchdog and self.cfg.active
+    end
+    return self.cfg.autostart
+end
+
+--- 记一次自动启动失败；连续失败到上限就停手，并且只提示一次
+function EasyTier:note_auto_start_failure()
+    self.auto_start_fails = (self.auto_start_fails or 0) + 1
+    if self.auto_start_fails < self.AUTO_START_MAX_FAILS then return end
+    logger.warn("EasyTier auto start suspended after", self.auto_start_fails, "failures")
+    UI.info(string.format(
+        _("自动启动连续失败 %d 次，本次会话不再自动重试。\n\n可以看「工具 → 查看日志」和「工具 → 运行诊断」排查；修好后在菜单里手动启动即可。"),
+        self.auto_start_fails), 15)
+end
+
 function EasyTier:auto_start(reason)
+    reason = tostring(reason or "auto")
+
+    if not self:auto_start_allowed(reason) then
+        logger.info("EasyTier auto start skipped (intent changed):", reason)
+        return
+    end
     if Proc.is_running(self.cfg) then return end
+
+    if (self.auto_start_fails or 0) >= self.AUTO_START_MAX_FAILS then
+        logger.warn("EasyTier auto start suspended:", self.auto_start_fails, "failures")
+        return
+    end
+    local now = os.time()
+    if self.auto_start_next_at and now < self.auto_start_next_at then
+        logger.info("EasyTier auto start skipped (cooldown):", reason)
+        return
+    end
+
     local ok = Config.validate(self.cfg)
     if not ok then
         logger.warn("EasyTier auto start skipped: invalid config")
@@ -91,19 +154,36 @@ function EasyTier:auto_start(reason)
         logger.warn("EasyTier auto start skipped: no /dev/net/tun")
         return
     end
+
     local started, res = Proc.start(self.cfg)
-    logger.info("EasyTier auto start (" .. tostring(reason) .. "):", started, res)
-    if started then
-        self.cfg.active = true
-        Config.save(self.cfg)
-        local ok2, why = Proc.verify_started(self.cfg, 8)
-        logger.info("EasyTier auto start verify:", ok2, why)
-        if not ok2 then
-            -- 起来就崩的配置不要反复重试，免得阅读器上一直重启进程
-            self.cfg.active = false
-            Config.save(self.cfg)
-        end
+    logger.info("EasyTier auto start (" .. reason .. "):", started, res)
+
+    if not started then
+        -- 起不来就先冷一会儿，别在阅读器上反复拉
+        self.auto_start_next_at = now + self.AUTO_START_COOLDOWN
+        self:note_auto_start_failure()
+        return
     end
+
+    self.cfg.active = true
+    Config.save(self.cfg)
+
+    local ok2, why = Proc.verify_started(self.cfg, 8)
+    logger.info("EasyTier auto start verify:", ok2, why)
+    if ok2 then
+        self.auto_start_fails = 0
+        self.auto_start_next_at = nil
+        return
+    end
+
+    -- 起来就崩的配置不要反复重试，免得阅读器上一直重启进程
+    self.cfg.active = false
+    Config.save(self.cfg)
+    if self.cfg.mode == "tun" then
+        Proc.firewall_del(self.cfg.dev_name)
+    end
+    self.auto_start_next_at = now + self.AUTO_START_COOLDOWN
+    self:note_auto_start_failure()
 end
 
 function EasyTier:start(touchmenu_instance)
@@ -163,6 +243,10 @@ function EasyTier:start(touchmenu_instance)
     if not ok2 then
         self.cfg.active = false
         Config.save(self.cfg)
+        -- 启动失败时防火墙规则可能已经加上了：撤掉，别留一条指向不存在接口的规则
+        if self.cfg.mode == "tun" then
+            Proc.firewall_del(self.cfg.dev_name)
+        end
         local msg = _("EasyTier 进程启动后很快退出了，所以没有进入运行状态。\n\n日志末尾：\n")
             .. ((detail ~= nil and detail ~= "") and detail or _("(日志为空)"))
             .. "\n\n" .. _("可到「工具 → 运行诊断」看环境（TUN、架构、二进制），或到「工具 → 查看日志」看完整输出。")
@@ -228,8 +312,8 @@ end
 
 function EasyTier:onNetworkConnected()
     if self.cfg.start_on_wifi or (self.cfg.watchdog and self.cfg.active) then
-        -- 等 DHCP 把地址落下来一点再动手
-        UIManager:scheduleIn(3, function() self:auto_start("wifi-connected") end)
+        -- 等 DHCP 把地址落下来一点再动手；同一个理由只留一个待执行任务，事件重复触发也不会排一堆
+        self:schedule_auto_start(3, "wifi-connected")
     end
 end
 
@@ -242,7 +326,7 @@ function EasyTier:onResume()
     -- 回到前台时顺手给日志瘦身（日志是追加写的，长跑会一直涨）
     Proc.trim_log()
     if self.cfg.watchdog and self.cfg.active and not Proc.is_running(self.cfg) then
-        UIManager:scheduleIn(5, function() self:auto_start("resume-watchdog") end)
+        self:schedule_auto_start(5, "resume-watchdog")
     end
 end
 
