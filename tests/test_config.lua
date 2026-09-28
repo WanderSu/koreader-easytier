@@ -269,6 +269,109 @@ do
     check("迁移不会产生重复项", #cfg.peers == 1, Config.list_to_text(cfg.peers))
 end
 
+--==== 归一化：类型被写坏 / 缺字段 / 老配置都不能让插件崩 ====--
+do
+    -- 一个被写坏的设置：字符串字段里是数字、布尔是字符串、列表是字符串，还夹着不认识的字段
+    local broken = {
+        network_name = 12345,
+        hostname = 678,              -- 以前会让 validate 里的 hostname:find 直接抛错
+        instance_name = { "x" },     -- 表
+        mode = "proxy",
+        dhcp = "yes",
+        socks5_port = "1080",
+        mtu = "1400",
+        peers = "tcp://a:11010, udp://b:11010",
+        listeners = { "tcp://0.0.0.0:11010", 11010, "" },
+        watchdog = "false",
+        log_level = nil,
+        unknown_field = "x",
+    }
+    local cfg = Config.normalize(broken)
+    check("字符串字段被收紧成字符串", cfg.network_name == "12345", tostring(cfg.network_name))
+    check("数字形式的 hostname 也变成字符串",
+        type(cfg.hostname) == "string" and cfg.hostname == "678", tostring(cfg.hostname))
+    check("表形式的字符串字段退回默认值", type(cfg.instance_name) == "string", type(cfg.instance_name))
+    check("yes 这样的字符串被认成真", cfg.dhcp == true, tostring(cfg.dhcp))
+    check("false 字符串被认成假", cfg.watchdog == false, tostring(cfg.watchdog))
+    check("数字字符串变成数字", cfg.socks5_port == 1080 and cfg.mtu == 1400,
+        tostring(cfg.socks5_port) .. "/" .. tostring(cfg.mtu))
+    check("列表字段的字符串被切开", #cfg.peers == 2 and cfg.peers[1] == "tcp://a:11010",
+        table.concat(cfg.peers, " "))
+    check("列表里的空串和非字符串被丢掉", #cfg.listeners == 2 and cfg.listeners[2] == "11010",
+        table.concat(cfg.listeners, " "))
+    check("缺字段用默认值", cfg.log_level == Config.DEFAULTS.log_level, tostring(cfg.log_level))
+    check("不认识的字段被丢掉", cfg.unknown_field == nil)
+    check("归一化后的配置能被校验（不抛错）", pcall(Config.validate, cfg))
+    check("归一化不改默认值表本身", Config.DEFAULTS.peers ~= cfg.peers)
+    check("归一化保留 external_node（迁移要用它，再由 load 并进 peers）",
+        Config.normalize({ external_node = "tcp://a:11010" }).external_node == "tcp://a:11010")
+end
+
+--==== 归一化 + 迁移一起走：旧设置里的 external_node 必须并进 peers ====--
+do
+    local old = { external_node = "tcp://old:11010", peers = "tcp://new:11010", hostname = 42 }
+    local cfg = Config.normalize(old)
+    check("归一化保留 external_node 供迁移使用", cfg.external_node == "tcp://old:11010", cfg.external_node)
+    check("归一化把 peers 字符串切开", #cfg.peers == 1 and cfg.peers[1] == "tcp://new:11010")
+    cfg.external_node = ""
+    local argv = Config.build_argv(cfg)
+    local has_e = false
+    for _i, a in ipairs(argv) do
+        if a == "-e" or a == "--external-node" then has_e = true end
+    end
+    check("插件不再输出 -e/--external-node", has_e == false, table.concat(argv, " "))
+    check("旧值已经变成 --peers", contains(argv, "--peers") and contains(argv, "tcp://new:11010"))
+end
+
+--==== 光杆参数：needs_value 必须真的认得这些开关（曾因数组/集合写法永久空转）====--
+do
+    for _i, f in ipairs({ "--network-name", "--peers", "--rpc-portal", "--console-log-level" }) do
+        check("needs_value 认得 " .. f, Config.needs_value(f) == true)
+    end
+    check("纯开关不需要值",
+        Config.needs_value("--dhcp") == false and Config.needs_value("--no-tun") == false
+            and Config.needs_value("--no-listener") == false)
+
+    -- 空字段不许留下光杆开关（否则会把后面的参数名吞掉）
+    local cfg = base_cfg({
+        network_name = "", network_secret = "", hostname = "", mode = "tun", dhcp = true,
+        default_protocol = "", log_level = "",
+    })
+    check_no_dangling_flag("空字符串字段不产生光杆参数", Config.build_argv(cfg))
+
+    local cfg2 = base_cfg({ mode = "proxy", socks5_port = 1080, peers = { "tcp://a:11010" }, log_level = "warn" })
+    check_no_dangling_flag("代理模式不产生光杆参数", Config.build_argv(cfg2))
+
+    local cfg3 = base_cfg({ mode = "tun", dhcp = false, ipv4 = "10.144.144.2", log_level = "info" })
+    check_no_dangling_flag("手填 IP 模式不产生光杆参数", Config.build_argv(cfg3))
+end
+
+--==== 校验提示必须回答「哪里不对 + 怎么改」 ====--
+do
+    local _, err1 = Config.validate(base_cfg({ mode = "tun", dhcp = false, ipv4 = "" }))
+    check("缺 IP：给出两种改法", err1 and err1:find("DHCP", 1, true) ~= nil
+        and err1:find("10.144", 1, true) ~= nil, err1)
+
+    local _, err2 = Config.validate(base_cfg({ mode = "tun", dhcp = false, ipv4 = "abc" }))
+    check("IP 格式错：带正确示例", err2 and err2:find("10.144.144.2", 1, true) ~= nil, err2)
+
+    local _, err3 = Config.validate(base_cfg({ mode = "proxy", socks5_port = "abc" }))
+    check("端口不是数字：带当前值和示例",
+        err3 and err3:find("1080", 1, true) ~= nil and err3:find("abc", 1, true) ~= nil, err3)
+
+    local _, err4 = Config.validate(base_cfg({ dev_name = string.rep("x", 20) }))
+    check("接口名过长：说出当前长度", err4 and err4:find("20", 1, true) ~= nil, err4)
+
+    local _, err5 = Config.validate(base_cfg({ mtu = 100 }))
+    check("MTU 太小：给出建议值", err5 and err5:find("1280", 1, true) ~= nil, err5)
+
+    local _, err6 = Config.validate(base_cfg({ peers = { "192.168.1.10:11010" } }))
+    check("缺协议前缀：直接告诉你补 tcp://", err6 and err6:find("tcp://", 1, true) ~= nil, err6)
+
+    local ok7, err7, warn7 = Config.validate(base_cfg({ network_name = "" }))
+    check("空网络名只是警告，不是错误", ok7 == true and err7 == nil and warn7 ~= nil, tostring(warn7))
+end
+
 --==== 文本裁剪（界面控件保护）====--
 do
     local clipped = Config.clip_text("短行\n" .. string.rep("x", 1000), 64 * 1024, 400)

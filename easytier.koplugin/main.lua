@@ -155,11 +155,14 @@ function EasyTier:auto_start(reason)
         return
     end
 
+    self.starting_at = now
     local started, res = Proc.start(self.cfg)
     logger.info("EasyTier auto start (" .. reason .. "):", started, res)
 
     if not started then
         -- 起不来就先冷一会儿，别在阅读器上反复拉
+        self.starting_at = nil
+        self.last_fail_at = now
         self.auto_start_next_at = now + self.AUTO_START_COOLDOWN
         self:note_auto_start_failure()
         return
@@ -171,12 +174,16 @@ function EasyTier:auto_start(reason)
     local ok2, why = Proc.verify_started(self.cfg, 8)
     logger.info("EasyTier auto start verify:", ok2, why)
     if ok2 then
+        self.starting_at = nil
+        self.last_fail_at = nil
         self.auto_start_fails = 0
         self.auto_start_next_at = nil
         return
     end
 
     -- 起来就崩的配置不要反复重试，免得阅读器上一直重启进程
+    self.starting_at = nil
+    self.last_fail_at = now
     self.cfg.active = false
     Config.save(self.cfg)
     if self.cfg.mode == "tun" then
@@ -227,10 +234,13 @@ function EasyTier:start(touchmenu_instance)
     end
 
     local busy = UI.busy(_("正在启动 EasyTier…"))
+    self.starting_at = os.time()
     local started, res = Proc.start(self.cfg)
     UIManager:close(busy)
 
     if not started then
+        self.starting_at = nil
+        self.last_fail_at = os.time()
         UI.info(tostring(res), 12)
         return
     end
@@ -241,6 +251,8 @@ function EasyTier:start(touchmenu_instance)
     -- 只看「启动命令发出去了」不作数：要连续几秒确认进程还在，并且 RPC 真的应答
     local ok2, reason, detail = Proc.verify_started(self.cfg, 8)
     if not ok2 then
+        self.starting_at = nil
+        self.last_fail_at = os.time()
         self.cfg.active = false
         Config.save(self.cfg)
         -- 启动失败时防火墙规则可能已经加上了：撤掉，别留一条指向不存在接口的规则
@@ -254,6 +266,9 @@ function EasyTier:start(touchmenu_instance)
         if touchmenu_instance then touchmenu_instance:updateItems() end
         return
     end
+
+    self.starting_at = nil
+    self.last_fail_at = nil
 
     local pid = Proc.pid(self.cfg) or res
     local msg
@@ -273,6 +288,9 @@ end
 function EasyTier:stop(touchmenu_instance, force)
     -- 用户明确要停：把之前排下的自动启动作废，免得几秒后又被定时任务拉起来
     self:cancel_pending_auto_start()
+    -- 用户主动停掉之后，菜单里该显示「未运行」而不是上次的启动失败
+    self.starting_at = nil
+    self.last_fail_at = nil
     if not Proc.is_running(self.cfg) then
         self.cfg.active = false
         Config.save(self.cfg)
@@ -336,6 +354,26 @@ end
 -- 状态 / 日志 / 诊断
 --==========================================================================
 
+--- 一句话状态。只做便宜判断（pid 文件 / /proc），不调 easytier-cli——
+--- 菜单每次展开都会跑一遍 text_func，阅读器上不能有慢操作。
+function EasyTier:state_text()
+    local pid = Proc.pid(self.cfg)
+    if pid then
+        return string.format(_("状态：运行中（PID %s）"), tostring(pid))
+    end
+    -- 刚发出启动命令、进程还在起来的过程中（最多认 60 秒，卡住的标记会自己失效）
+    if self.starting_at and (os.time() - self.starting_at) <= 60 then
+        return _("状态：正在启动…")
+    end
+    if self.last_fail_at then
+        return _("状态：启动失败（最近一次没起来，可看日志）")
+    end
+    if self.cfg.active then
+        return _("状态：异常（本该在运行，但进程不在了）")
+    end
+    return _("状态：未运行")
+end
+
 function EasyTier:status_text()
     local cfg = self.cfg
     local L = {}
@@ -346,6 +384,7 @@ function EasyTier:status_text()
     put(Config.summary(cfg))
     put("")
     put("== 进程 ==")
+    put(self:state_text())
     local pid = Proc.pid(cfg)
     if pid then
         put(string.format("运行中，PID %d", pid))
@@ -597,6 +636,13 @@ function EasyTier:addToMainMenu(menu_items)
         sorting_hint = "network",
         text = _("EasyTier 异地组网"),
         sub_item_table = {
+            {
+                -- 状态只用便宜的判断（读 pid 文件 / /proc），不碰 RPC：菜单每次展开都会跑一次 text_func，
+                -- 在阅读器上绝不能让它去调 easytier-cli。虚拟 IP、对端数在「连接状态」里看。
+                text_func = function() return self:state_text() end,
+                keep_menu_open = true,
+                callback = function() self:show_status() end,
+            },
             {
                 text_func = function()
                     local pid = Proc.pid(self.cfg)

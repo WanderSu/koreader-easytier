@@ -95,24 +95,79 @@ local function copy_defaults()
     return cfg
 end
 
---- 读取配置（合并默认值），返回配置表
-function Config.load()
-    local cfg = copy_defaults()
-    local s = settings()
-    local stored = s and s:readSetting(Config.SETTINGS_KEY)
-    if type(stored) == "table" then
-        for k, v in pairs(stored) do
-            if cfg[k] ~= nil then
-                if type(cfg[k]) == "table" and type(v) == "table" then
-                    local t = {}
-                    for i, item in ipairs(v) do t[i] = tostring(item) end
-                    cfg[k] = t
-                elseif type(cfg[k]) ~= "table" then
-                    cfg[k] = v
-                end
+--==========================================================================
+-- 归一化：外部来的值（旧版本写的、手改过的、损坏的设置）一律先修正再用
+--==========================================================================
+
+local function as_string(v, fallback)
+    if type(v) == "string" then return v end
+    if type(v) == "number" then return tostring(v) end
+    return fallback or ""
+end
+
+--- 只认真正的布尔；字符串形式也认，避免手改设置后开关被当成假
+local function as_bool(v, fallback)
+    if type(v) == "boolean" then return v end
+    if type(v) == "number" then return v ~= 0 end
+    if type(v) == "string" then
+        local s = v:lower()
+        if s == "true" or s == "yes" or s == "on" or s == "1" then return true end
+        if s == "false" or s == "no" or s == "off" or s == "0" or s == "" then return false end
+    end
+    return fallback or false
+end
+
+local function as_number(v, fallback)
+    if type(v) == "number" then return v end
+    local n = tonumber(v)
+    if n then return n end
+    return fallback
+end
+
+--- 列表字段：字符串按逗号/分号/空白切开，表逐项转成字符串
+local function as_list(v)
+    if type(v) == "table" then
+        local out = {}
+        for _i, item in ipairs(v) do
+            if type(item) == "string" then
+                if item ~= "" then out[#out + 1] = item end
+            elseif type(item) == "number" then
+                out[#out + 1] = tostring(item)
             end
         end
+        return out
     end
+    if type(v) == "string" then return Config.text_to_list(v) end
+    return {}
+end
+
+--- 归一化配置：每个字段按默认值声明的类型收敛，类型不对就退回默认值；不认识的字段丢掉。
+--- 必须在任何校验 / 参数生成之前调用。一个类型不对的字段（比如 hostname 被写成数字或表）
+--- 会让 validate 里的 `cfg.hostname:find("%s")` 直接抛错，而 validate 是在菜单回调里跑的——
+--- 那就是「白屏 + KOReader 退出」这类 P0 事故。
+function Config.normalize(cfg)
+    if type(cfg) ~= "table" then return copy_defaults() end
+    local out = copy_defaults()
+    for k, default in pairs(Config.DEFAULTS) do
+        local v = cfg[k]
+        if Config.LIST_FIELDS[k] then
+            out[k] = as_list(v)
+        elseif type(default) == "boolean" then
+            out[k] = as_bool(v, default)
+        elseif type(default) == "number" then
+            out[k] = as_number(v, default)
+        else
+            out[k] = as_string(v, default)
+        end
+    end
+    return out
+end
+
+--- 读取配置：归一化 + 默认值合并 + 历史字段迁移
+function Config.load()
+    local s = settings()
+    local stored = s and s:readSetting(Config.SETTINGS_KEY)
+    local cfg = Config.normalize(stored)
 
     -- 历史字段迁移：--external-node(-e) 在 core 里和 --peers 走的是同一段代码
     -- （同样构造 PeerConfig、塞进同一个 peers 列表），唯一差别是它只能填一个值。
@@ -243,15 +298,18 @@ function Config.validate(cfg)
     if cfg.mode == "tun" then
         if not cfg.dhcp then
             if cfg.ipv4 == "" then
-                return false, _("TUN 模式下需要填写本节点 IP，或改用 DHCP 自动分配。")
+                return false, _("TUN 模式下需要填写本节点 IP，或改用 DHCP 自动分配。\n")
+                    .. _("改法：到「配置 → 节点 IP」填一个（示例：10.144.144.2），或到「配置 → DHCP」打开自动分配。")
             end
             if not is_ipv4_or_cidr(cfg.ipv4) then
-                return false, _("节点 IP 格式不对：") .. cfg.ipv4 .. _("\n示例：10.144.144.2")
+                return false, _("节点 IP 格式不对：") .. cfg.ipv4
+                    .. _("\n要写成 IPv4 地址（示例：10.144.144.2，也可以带掩码 10.144.144.2/24）")
             end
         end
     else
         if not tonumber(cfg.socks5_port) then
-            return false, _("SOCKS5 端口必须是数字。")
+            return false, _("SOCKS5 端口必须是数字，当前是：") .. tostring(cfg.socks5_port)
+                .. _("\n改法：到「配置 → SOCKS5 端口」填一个端口号（示例：1080）")
         end
     end
 
@@ -290,7 +348,8 @@ function Config.validate(cfg)
         return false, _("RPC 端口格式不对：") .. cfg.rpc_portal .. _("\n示例：127.0.0.1:15888")
     end
     if cfg.dev_name ~= "" and #cfg.dev_name > 15 then
-        return false, _("TUN 接口名不能超过 15 个字符（内核限制）。")
+        return false, _("TUN 接口名不能超过 15 个字符（内核限制）：当前 ")
+            .. tostring(#cfg.dev_name) .. _(" 个字符\n示例：easytier0")
     end
     -- 主机名会用于魔法 DNS（<hostname>.et.net），实例名用于同一台机器上区分多个实例，
     -- 两者带空格都会带来麻烦（启动参数、展示、DNS 名字都不友好）
@@ -301,16 +360,31 @@ function Config.validate(cfg)
         return false, _("实例名里不要有空格：") .. cfg.instance_name .. _("\n示例：kindle-kpw6")
     end
     if tonumber(cfg.mtu) and tonumber(cfg.mtu) > 0 and tonumber(cfg.mtu) < 576 then
-        return false, _("MTU 太小了，建议留空或填 1280 以上。")
+        return false, _("MTU 太小了：") .. tostring(cfg.mtu)
+            .. _("\n改法：留空（用 EasyTier 默认值）或填 1280 以上，示例：1280")
     end
     return true, nil, warn
 end
 
--- 需要跟一个值的开关：值为空时必须整对跳过，否则会把后面的参数名吞掉当成自己的值
+-- 需要跟一个值的开关：值为空时必须整对跳过，否则会把后面的参数名吞掉当成自己的值。
+-- 这里必须是「集合」而不是数组：needs_value 用字符串下标去查，数组写法会让它永远返回 false，
+-- 于是结构自检变成空转——光杆参数再也查不出来（改坏过，2026-09 修正）。
 local VALUE_FLAGS = {
-    "--network-name", "--network-secret", "--instance-name", "--hostname", "--rpc-portal",
-    "--socks5", "--dev-name", "--mtu", "--ipv4", "--peers",
-    "--proxy-networks", "--listeners", "--port-forward", "--default-protocol", "--console-log-level",
+    ["--network-name"] = true,
+    ["--network-secret"] = true,
+    ["--instance-name"] = true,
+    ["--hostname"] = true,
+    ["--rpc-portal"] = true,
+    ["--socks5"] = true,
+    ["--dev-name"] = true,
+    ["--mtu"] = true,
+    ["--ipv4"] = true,
+    ["--peers"] = true,
+    ["--proxy-networks"] = true,
+    ["--listeners"] = true,
+    ["--port-forward"] = true,
+    ["--default-protocol"] = true,
+    ["--console-log-level"] = true,
 }
 
 --- 生成 easytier-core 的参数列表（不含可执行文件本身）

@@ -348,12 +348,23 @@ function Proc.trim_log(max_bytes, keep_lines)
 
     keep_lines = keep_lines or Proc.LOG_KEEP_LINES
     local tail = Proc.tail_file(path, keep_lines, 256 * 1024)
-    local f = io.open(path, "w")
+    -- 不能直接打开 path 写：core 还在往这个文件追加，边截边写会把它的输出吞掉或写乱。
+    -- 先写临时文件再原子替换；替换后 core 手里的旧 fd 指向已删除的 inode，不会污染新文件。
+    local tmp = path .. ".trim"
+    local f = io.open(tmp, "w")
     if not f then return false, size end
     f:write(string.format(_("（日志超过 %s 上限，只保留最近 %d 行）\n"),
         Proc.human_size(max_bytes), keep_lines))
     f:write(tail)
     f:close()
+    if not os.rename(tmp, path) then
+        -- 有些文件系统（含 Windows）不允许 rename 覆盖已存在的文件，退化成先删再改名
+        os.remove(path)
+        if not os.rename(tmp, path) then
+            os.remove(tmp)
+            return false, size
+        end
+    end
     logger.info(string.format("EasyTier: 日志瘦身 %d -> %d 字节", size, Proc.log_file_size()))
     return true, size
 end

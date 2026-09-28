@@ -408,5 +408,108 @@ do
     EasyTier.cfg.active = false
 end
 
+--==== 状态文案：只做便宜判断，不调 easytier-cli ====--
+do
+    local Proc = require("et_proc")
+    local real_pid = Proc.pid
+    Proc.pid = function() return nil end
+    EasyTier.starting_at, EasyTier.last_fail_at = nil, nil
+    EasyTier.cfg.active = false
+
+    check("未运行", EasyTier:state_text():find("未运行", 1, true) ~= nil, EasyTier:state_text())
+    EasyTier.cfg.active = true
+    check("本该在运行但进程没了 → 异常", EasyTier:state_text():find("异常", 1, true) ~= nil, EasyTier:state_text())
+    EasyTier.cfg.active = false
+    EasyTier.last_fail_at = os.time()
+    check("启动失败", EasyTier:state_text():find("启动失败", 1, true) ~= nil, EasyTier:state_text())
+    EasyTier.last_fail_at = nil
+    EasyTier.starting_at = os.time()
+    check("刚发出启动命令 → 正在启动", EasyTier:state_text():find("正在启动", 1, true) ~= nil, EasyTier:state_text())
+    EasyTier.starting_at = os.time() - 120
+    check("卡住的启动标记会自己失效", EasyTier:state_text():find("正在启动", 1, true) == nil, EasyTier:state_text())
+    EasyTier.starting_at = nil
+    Proc.pid = function() return 1234 end
+    check("有进程 → 运行中并带 PID",
+        EasyTier:state_text():find("运行中", 1, true) ~= nil
+            and EasyTier:state_text():find("1234", 1, true) ~= nil,
+        EasyTier:state_text())
+    Proc.pid = real_pid
+end
+
+--==== 生命周期：重复启动 / 重复停止 / 启停交替 / 重启 都不该多拉一个进程 ====--
+do
+    local Proc = require("et_proc")
+    local real_running, real_start, real_stop = Proc.is_running, Proc.start, Proc.stop
+    local real_find, real_verify = Proc.find, Proc.verify_started
+    local running, starts, stops = false, 0, 0
+    Proc.is_running = function() return running end
+    Proc.start = function() starts = starts + 1 running = true return true, 111 end
+    Proc.stop = function() stops = stops + 1 running = false return true end
+    Proc.find = function() return "out/easytier-core" end
+    Proc.verify_started = function() return true, "rpc" end
+
+    EasyTier.cfg.mode = "proxy" -- 免去 TUN 检查，专测生命周期
+    EasyTier.cfg.active = false
+    EasyTier.starting_at, EasyTier.last_fail_at = nil, nil
+    EasyTier.auto_start_fails, EasyTier.auto_start_next_at = 0, nil
+
+    starts, stops, running = 0, 0, false
+    EasyTier:start()
+    EasyTier:start()
+    check("连续两次启动只拉起一个进程", starts == 1, tostring(starts))
+    check("启动后进入运行中", running == true)
+    check("启动成功后没有失败标记", EasyTier.last_fail_at == nil, tostring(EasyTier.last_fail_at))
+
+    EasyTier:stop()
+    EasyTier:stop()
+    check("连续两次停止只发一次停止命令", stops == 1, tostring(stops))
+    check("停止后没有失败标记", EasyTier.last_fail_at == nil)
+
+    starts, stops, running = 0, 0, false
+    EasyTier:start()
+    EasyTier:stop()
+    EasyTier:start()
+    check("启停交替：两次启动一次停止", starts == 2 and stops == 1,
+        tostring(starts) .. "/" .. tostring(stops))
+    check("最终处于运行中", running == true)
+
+    starts, stops, running = 0, 0, true
+    EasyTier:restart()
+    check("重启 = 一次停止 + 一次启动", starts == 1 and stops == 1,
+        tostring(starts) .. "/" .. tostring(stops))
+
+    -- 启动失败：状态显示「启动失败」
+    Proc.start = function() starts = starts + 1 return false, "启动失败（测试）" end
+    starts, running = 0, false
+    EasyTier.cfg.active = false
+    EasyTier:start()
+    check("启动失败被记下来", EasyTier.last_fail_at ~= nil)
+    check("失败后状态显示启动失败", EasyTier:state_text():find("启动失败", 1, true) ~= nil,
+        EasyTier:state_text())
+
+    -- 崩溃（进程没了但意图还在）→ 看门狗排一次恢复任务，而且不重复排
+    EasyTier.cfg.watchdog = true
+    EasyTier.cfg.active = true
+    running = false
+    EasyTier.last_fail_at = nil
+    scheduled = {}
+    EasyTier.pending_starts = {}
+    EasyTier:onResume()
+    check("崩溃后看门狗排一个恢复任务", #scheduled == 1, #scheduled)
+    scheduled = {}
+    EasyTier.pending_starts = {}
+    EasyTier:onResume()
+    EasyTier:onResume()
+    check("连续两次 onResume 只排一个恢复任务", #scheduled == 1, #scheduled)
+
+    Proc.is_running, Proc.start, Proc.stop = real_running, real_start, real_stop
+    Proc.find, Proc.verify_started = real_find, real_verify
+    EasyTier.pending_starts = {}
+    EasyTier.cfg.watchdog = false
+    EasyTier.cfg.active = false
+    EasyTier.last_fail_at = nil
+    EasyTier.starting_at = nil
+end
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

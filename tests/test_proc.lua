@@ -405,6 +405,11 @@ do
     check("瘦身后明显变小", after < before / 4, after)
     check("保留的是最近的行", Proc.tail_file(path, 2, 4096):find("4000", 1, true) ~= nil,
         Proc.tail_file(path, 2, 4096))
+    -- 瘦身不能直接 truncate 原文件（core 还在往里追加），走的是临时文件 + 原子替换
+    check("没留下 .trim 临时文件", io.open(path .. ".trim", "r") == nil)
+    check("新文件里有截断说明",
+        Proc.tail_file(path, 500, 256 * 1024):find("只保留最近", 1, true) ~= nil,
+        Proc.tail_file(path, 2, 4096))
 
     Proc.log_path, Proc.log_file_size = real_log_path, real_log_size
     util.pathExists = real_pathExists
