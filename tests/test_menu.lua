@@ -387,6 +387,18 @@ do
     EasyTier:auto_start("wifi-connected")
     check("冷却期内不重试", start_calls == calls_before_cooldown, tostring(start_calls))
 
+    -- stop() 本身就要作废定时任务（不只是手动调 cancel_pending_auto_start）
+    EasyTier.cfg.start_on_wifi = true
+    EasyTier.cfg.active = true
+    scheduled = {}
+    EasyTier.pending_starts = {}
+    EasyTier:onNetworkConnected()
+    check("停止前先排下了一个启动任务", #scheduled == 1, #scheduled)
+    start_calls = 0
+    EasyTier:stop()
+    scheduled[1].fn()
+    check("stop() 会作废之前排下的启动任务", start_calls == 0, tostring(start_calls))
+
     Proc.is_running, Proc.start = real_is_running, real_start
     Proc.find, Proc.tun_state, Proc.verify_started = real_find, real_tun, real_verify
     EasyTier.auto_start_fails = 0

@@ -271,6 +271,8 @@ function EasyTier:start(touchmenu_instance)
 end
 
 function EasyTier:stop(touchmenu_instance, force)
+    -- 用户明确要停：把之前排下的自动启动作废，免得几秒后又被定时任务拉起来
+    self:cancel_pending_auto_start()
     if not Proc.is_running(self.cfg) then
         self.cfg.active = false
         Config.save(self.cfg)
